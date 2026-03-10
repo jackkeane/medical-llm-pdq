@@ -13,9 +13,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
 
-ROOT = Path('/home/zz79jk/clawd')
+PDQ_DIR = Path(__file__).resolve().parent
+ROOT = PDQ_DIR.parent
 PROJECT = ROOT / 'medical-llm'
-PDQ_DIR = ROOT / 'medical-llm-pdq'
 
 BASE_MODEL = PROJECT / 'models' / 'biomistral-7b'
 ADAPTER = PROJECT / 'outputs' / 'biomistral-medical'

@@ -2,25 +2,27 @@
 
 Pruning + Distillation + Quantization workflow for the medical LLM checkpoint.
 
-> Original base/adapter weights come from the sibling project: `~/clawd/medical-llm`.
+> Original base/adapter weights come from the sibling project: `../medical-llm` (relative path from this repo).
 
 ## Upstream Weight Source (important)
 
 This project does **not** train the original medical model from scratch.
 It consumes artifacts produced in `medical-llm`:
 
-- Base model: `~/clawd/medical-llm/models/biomistral-7b`
-- Medical adapter: `~/clawd/medical-llm/outputs/biomistral-medical`
-- Data splits: `~/clawd/medical-llm/data/processed/{medical_train,medical_test}.json`
+- Base model: `../medical-llm/models/biomistral-7b`
+- Medical adapter: `../medical-llm/outputs/biomistral-medical`
+- Data splits: `../medical-llm/data/processed/{medical_train,medical_test}.json`
 
 If those paths are missing, regenerate them in the `medical-llm` project first.
 
 ## Environment
 
-Recommended environment from this workspace:
+Recommended environment:
 
 ```bash
-~/anaconda3/bin/conda run -n py312 python -V
+conda create -n pdq python=3.12 -y
+conda activate pdq
+python -V
 ```
 
 Main dependencies used here:
@@ -29,6 +31,11 @@ Main dependencies used here:
 - `peft`
 - `bitsandbytes`
 - `tqdm`
+
+Install example:
+```bash
+pip install torch transformers peft bitsandbytes tqdm
+```
 
 ## Project Structure
 
@@ -47,16 +54,19 @@ medical-llm-pdq/
 
 ## How to Run
 
-From workspace root:
+From your workspace root (folder containing both repos):
 
 ```bash
-cd ~/clawd
+cd <your-workspace>
+# expected layout:
+# <your-workspace>/medical-llm
+# <your-workspace>/medical-llm-pdq
 ```
 
 ### 1) (Optional) Single-step pruning sanity run
 
 ```bash
-~/anaconda3/bin/conda run -n py312 python medical-llm-pdq/run_pruning_step.py
+python medical-llm-pdq/run_pruning_step.py
 ```
 
 Outputs:
@@ -66,7 +76,7 @@ Outputs:
 ### 2) Iterative pruning
 
 ```bash
-~/anaconda3/bin/conda run -n py312 python medical-llm-pdq/run_iterative_pruning.py
+python medical-llm-pdq/run_iterative_pruning.py
 ```
 
 Outputs:
@@ -76,7 +86,7 @@ Outputs:
 ### 3) Distillation recovery per pruning stage
 
 ```bash
-~/anaconda3/bin/conda run -n py312 python medical-llm-pdq/run_iterative_distillation.py
+python medical-llm-pdq/run_iterative_distillation.py
 ```
 
 Outputs:
@@ -86,7 +96,7 @@ Outputs:
 ### 4) Quantization benchmark (fp16/int8/nf4)
 
 ```bash
-~/anaconda3/bin/conda run -n py312 python medical-llm-pdq/run_quantization_step.py
+python medical-llm-pdq/run_quantization_step.py
 ```
 
 Outputs:

@@ -8,8 +8,8 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-ROOT = Path('/home/zz79jk/clawd')
-PDQ = ROOT / 'medical-llm-pdq'
+PDQ = Path(__file__).resolve().parent
+ROOT = PDQ.parent
 PROJECT = ROOT / 'medical-llm'
 
 MODEL_DIR = PDQ / 'artifacts' / 'iterative-wanda-2of4-distilled' / 'stage3_add_down_proj'
