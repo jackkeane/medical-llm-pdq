@@ -1,0 +1,9 @@
+# Large generated artifacts
+artifacts/
+
+# Python
+__pycache__/
+*.pyc
+
+# Optional local outputs
+*.log

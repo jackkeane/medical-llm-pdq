@@ -1,0 +1,43 @@
+{
+  "source_model": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/iterative-wanda-2of4-distilled/stage3_add_down_proj",
+  "note": "Quantization done with bitsandbytes (INT8/NF4). AWQ package not installed in env.",
+  "results": [
+    {
+      "mode": "fp16",
+      "accuracy": {
+        "total": 100,
+        "correct": 79,
+        "accuracy": 0.79
+      },
+      "memory_footprint_bytes": 14510727424,
+      "memory_footprint_gb": 13.51416802406311,
+      "accuracy_delta_vs_fp16": 0.0,
+      "memory_saving_vs_fp16": 0.0
+    },
+    {
+      "mode": "int8",
+      "accuracy": {
+        "total": 100,
+        "correct": 81,
+        "accuracy": 0.81
+      },
+      "memory_footprint_bytes": 7558668544,
+      "memory_footprint_gb": 7.03955864906311,
+      "accuracy_delta_vs_fp16": 0.020000000000000018,
+      "memory_saving_vs_fp16": 0.47909788922791363
+    },
+    {
+      "mode": "nf4",
+      "accuracy": {
+        "total": 100,
+        "correct": 81,
+        "accuracy": 0.81
+      },
+      "memory_footprint_bytes": 4069007616,
+      "memory_footprint_gb": 3.7895586490631104,
+      "accuracy_delta_vs_fp16": 0.020000000000000018,
+      "memory_saving_vs_fp16": 0.7195862414678075
+    }
+  ],
+  "recommended_for_next_step": "nf4"
+}

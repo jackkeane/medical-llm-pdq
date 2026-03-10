@@ -1,0 +1,74 @@
+{
+  "method": "Per-stage distillation after iterative Wanda 2:4 pruning",
+  "distill_hparams": {
+    "alpha_ce": 0.6,
+    "beta_kl": 0.4,
+    "temperature": 2.0,
+    "max_steps": 80,
+    "lr": 0.0001,
+    "batch_size": 1,
+    "max_len": 512
+  },
+  "results": [
+    {
+      "stage": "stage1_up_proj",
+      "before": {
+        "total": 100,
+        "correct": 72,
+        "accuracy": 0.72
+      },
+      "after": {
+        "total": 100,
+        "correct": 78,
+        "accuracy": 0.78
+      },
+      "delta_accuracy": 0.06000000000000005,
+      "distill": {
+        "steps": 80,
+        "loss_last": 1.1169350147247314,
+        "loss_mean": 1.0408492863178254
+      },
+      "artifact_dir": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/iterative-wanda-2of4-distilled/stage1_up_proj"
+    },
+    {
+      "stage": "stage2_add_gate_proj",
+      "before": {
+        "total": 100,
+        "correct": 67,
+        "accuracy": 0.67
+      },
+      "after": {
+        "total": 100,
+        "correct": 74,
+        "accuracy": 0.74
+      },
+      "delta_accuracy": 0.06999999999999995,
+      "distill": {
+        "steps": 80,
+        "loss_last": 1.1782641410827637,
+        "loss_mean": 1.145547903329134
+      },
+      "artifact_dir": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/iterative-wanda-2of4-distilled/stage2_add_gate_proj"
+    },
+    {
+      "stage": "stage3_add_down_proj",
+      "before": {
+        "total": 100,
+        "correct": 62,
+        "accuracy": 0.62
+      },
+      "after": {
+        "total": 100,
+        "correct": 80,
+        "accuracy": 0.8
+      },
+      "delta_accuracy": 0.18000000000000005,
+      "distill": {
+        "steps": 80,
+        "loss_last": 0.9457776546478271,
+        "loss_mean": 1.2581541493535042
+      },
+      "artifact_dir": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/iterative-wanda-2of4-distilled/stage3_add_down_proj"
+    }
+  ]
+}

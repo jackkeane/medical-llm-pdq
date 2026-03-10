@@ -1,0 +1,75 @@
+{
+  "method": "Iterative Wanda-style activation-aware 2:4 semi-structured pruning",
+  "device": "cuda",
+  "dtype": "torch.bfloat16",
+  "baseline": {
+    "eval": {
+      "total": 100,
+      "correct": 74,
+      "accuracy": 0.74
+    },
+    "nonzero_params": 7241732092,
+    "total_params": 7241732096,
+    "global_sparsity": 5.523540513863168e-10
+  },
+  "stages": [
+    {
+      "stage": "stage1_up_proj",
+      "include_keys": [
+        "up_proj"
+      ],
+      "newly_pruned_modules": 32,
+      "pruned_params_this_stage": 939524096,
+      "considered_params_this_stage": 1879048192,
+      "effective_sparsity_this_stage": 0.5,
+      "eval": {
+        "total": 100,
+        "correct": 77,
+        "accuracy": 0.77
+      },
+      "nonzero_params": 6302207996,
+      "global_sparsity": 0.1297374837325106,
+      "accuracy_delta_vs_baseline": 0.030000000000000027
+    },
+    {
+      "stage": "stage2_add_gate_proj",
+      "include_keys": [
+        "up_proj",
+        "gate_proj"
+      ],
+      "newly_pruned_modules": 32,
+      "pruned_params_this_stage": 939524096,
+      "considered_params_this_stage": 1879048192,
+      "effective_sparsity_this_stage": 0.5,
+      "eval": {
+        "total": 100,
+        "correct": 68,
+        "accuracy": 0.68
+      },
+      "nonzero_params": 5362683900,
+      "global_sparsity": 0.25947496691266714,
+      "accuracy_delta_vs_baseline": -0.05999999999999994
+    },
+    {
+      "stage": "stage3_add_down_proj",
+      "include_keys": [
+        "up_proj",
+        "gate_proj",
+        "down_proj"
+      ],
+      "newly_pruned_modules": 32,
+      "pruned_params_this_stage": 939524094,
+      "considered_params_this_stage": 1879048192,
+      "effective_sparsity_this_stage": 0.49999999893563135,
+      "eval": {
+        "total": 100,
+        "correct": 61,
+        "accuracy": 0.61
+      },
+      "nonzero_params": 4423159806,
+      "global_sparsity": 0.3892124498166467,
+      "accuracy_delta_vs_baseline": -0.13
+    }
+  ],
+  "artifact_root": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/iterative-wanda-2of4"
+}
