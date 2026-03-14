@@ -1,0 +1,28 @@
+{
+  "source_model": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/iterative-wanda-2of4-distilled-merged/stage3_add_down_proj",
+  "awq_output_dir": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/awq-w4a16-stage3",
+  "awq_recipe": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/awq_recipe_w4a16.yaml",
+  "calibration_dataset": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/awq_calibration_data/train.json",
+  "results": {
+    "fp16": {
+      "accuracy": {
+        "total": 100,
+        "correct": 79,
+        "accuracy": 0.79
+      },
+      "memory_footprint_bytes": 14483464448,
+      "memory_footprint_gb": 13.48877739906311
+    },
+    "awq_w4a16": {
+      "accuracy": {
+        "total": 100,
+        "correct": 80,
+        "accuracy": 0.8
+      },
+      "memory_footprint_bytes": 18136706816,
+      "memory_footprint_gb": 16.891124486923218,
+      "accuracy_delta_vs_fp16": 0.010000000000000009,
+      "memory_saving_vs_fp16": -0.25223539444697374
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "comparison": "awq_vs_nf4",
+  "timestamp_note": "Generated from existing report artifacts",
+  "awq_source": {
+    "report": "reports/awq_quantization_metrics.json",
+    "source_model": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/iterative-wanda-2of4-distilled-merged/stage3_add_down_proj",
+    "mode": "awq_w4a16",
+    "accuracy": 0.8,
+    "correct": 80,
+    "total": 100,
+    "memory_footprint_gb_reported": 16.891124486923218
+  },
+  "nf4_source": {
+    "report": "reports/quantization_step_metrics.json",
+    "source_model": "/home/zz79jk/clawd/medical-llm-pdq/artifacts/iterative-wanda-2of4-distilled/stage3_add_down_proj",
+    "mode": "nf4",
+    "accuracy": 0.81,
+    "correct": 81,
+    "total": 100,
+    "memory_footprint_gb_reported": 3.7895586490631104
+  },
+  "delta": {
+    "accuracy_awq_minus_nf4": -0.010000000000000009,
+    "correct_awq_minus_nf4": -1,
+    "memory_gb_awq_minus_nf4_reported": 13.101565837860107
+  },
+  "interpretation": {
+    "quality_on_current_100_eval": "NF4 slightly better by 1 sample (81 vs 80)",
+    "memory_note": "Do not compare AWQ reported memory_footprint directly against bitsandbytes NF4; loader/runtime accounting differs for compressed-tensors paths.",
+    "practical_recommendation": "Keep NF4 as primary deployment choice unless downstream runtime explicitly requires AWQ format."
+  }
+}
