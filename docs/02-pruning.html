@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 2 · Pruning, explained visually — Compression, visualized</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="site-head">
+  <a class="brand" href="index.html">Compression, visualized <span>· medical 7B case study</span></a>
+  <nav class="site-nav">
+    <a href="index.html">Overview</a>
+    <a href="01-baseline.html">1 · Baseline</a>
+    <a href="02-pruning.html" aria-current="page">2 · Pruning</a>
+    <a href="03-distillation.html">3 · Distillation</a>
+    <a href="04-quantization.html">4 · Quantization</a>
+    <a href="05-results.html">5 · Results</a>
+    <a href="06-deployment.html">6 · Serving</a>
+    <button class="theme-toggle" type="button" aria-label="Switch to dark mode">Dark mode</button>
+  </nav>
+</header>
+
+<p class="kicker">Chapter 2</p>
+<h1>Pruning: deleting 2.8 billion weights on purpose</h1>
+<p class="lede">Pruning bets that a large share of a trained model's weights contribute almost
+nothing — the hard part is deciding <em>which</em>. This run used <strong>Wanda</strong>-style
+scoring (judge each weight by its size <em>times how loud its input is</em> on real medical
+prompts) with a <strong>2:4 pattern</strong> (in every group of four weights, keep the best
+two), applied to the model's MLP layers in three stages — re-taking the exam after each.</p>
+
+<h2>Step 1 — pick a target: the layers that can spare it</h2>
+<p>A transformer block has two halves: attention (which routes information between tokens) and
+the MLP, or feed-forward network (which transforms it). The MLPs hold nearly
+<strong>78%</strong> of all weights and are widely observed to be the most redundant part of
+large models — so this run pruned only the three MLP matrices
+(<code>up_proj</code>, <code>gate_proj</code>, <code>down_proj</code>) in each of the 32
+blocks, and left attention, embeddings, and norms dense.</p>
+
+<div class="fig">
+  <p class="fig-title">Where the 7.24B parameters live</p>
+  <p class="fig-sub">Only the blue region is eligible for pruning; the rest stays dense</p>
+  <div class="legend">
+    <span class="key"><i class="swatch" style="background:var(--series-1)"></i> MLP layers · pruned</span>
+    <span class="key"><i class="swatch" style="background:var(--series-2)"></i> Attention · kept dense</span>
+    <span class="key"><i class="swatch" style="background:var(--de-emphasis)"></i> Embeddings + head · kept dense</span>
+  </div>
+  <div class="plot" id="chart-params"></div>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Component</th><th>Parameters</th><th>Share</th></tr>
+      <tr><td>MLP layers (up, gate, down × 32 blocks)</td><td>5,637,144,576</td><td>77.8%</td></tr>
+      <tr><td>Attention projections (q, k, v, o × 32)</td><td>1,342,177,280</td><td>18.5%</td></tr>
+      <tr><td>Embeddings + output head (+ norms)</td><td>262,410,240</td><td>3.6%</td></tr>
+    </table>
+  </details>
+</div>
+
+<h2>Step 2 — score every weight: Wanda's insight</h2>
+<p>The naive rule — keep big weights, delete small ones (<em>magnitude pruning</em>) — misses
+something: a weight only matters if its input actually fires. Wanda scores each weight as
+<strong>|weight| × average |activation| of its input channel</strong>, where the activation
+statistics come from running <strong>128 real medical prompts</strong> through the model and
+recording, per input channel, how loud it typically is. A big weight attached to a quiet
+channel is dead weight; a modest weight on a loud channel is load-bearing.</p>
+
+<div class="card" style="overflow-x:auto; padding:18px 10px 12px;">
+  <svg viewBox="0 0 640 252" width="640" height="252" role="img" style="min-width:560px; display:block; margin:0 auto;"
+       aria-label="Diagram of one group of four weights: weight magnitudes 0.80, 0.30, 0.50, 0.60 are multiplied by input loudness 0.1, 1.2, 0.9, 0.2 giving scores 0.08, 0.36, 0.45, 0.12; the two highest scores are kept and the other two weights are zeroed, including the largest weight 0.80">
+    <g font-family="system-ui,sans-serif">
+      <text x="320" y="18" text-anchor="middle" font-size="13" font-weight="650" fill="var(--text-primary)">One group of 4 weights — 2:4 keeps the best two</text>
+      <!-- row labels -->
+      <text x="8" y="63" font-size="11.5" fill="var(--text-secondary)">|weight|</text>
+      <text x="8" y="113" font-size="11.5" fill="var(--text-secondary)">× input loudness</text>
+      <text x="8" y="163" font-size="11.5" fill="var(--text-secondary)">= score</text>
+      <text x="8" y="216" font-size="11.5" fill="var(--text-secondary)">verdict</text>
+      <!-- columns: centers 195, 315, 435, 555; box w=100 -->
+      <!-- weights row -->
+      <rect x="145" y="40" width="100" height="34" rx="7" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="195" y="62" text-anchor="middle" font-size="13.5" font-weight="650" fill="var(--text-primary)">0.80</text>
+      <rect x="265" y="40" width="100" height="34" rx="7" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="315" y="62" text-anchor="middle" font-size="13.5" font-weight="650" fill="var(--text-primary)">0.30</text>
+      <rect x="385" y="40" width="100" height="34" rx="7" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="435" y="62" text-anchor="middle" font-size="13.5" font-weight="650" fill="var(--text-primary)">0.50</text>
+      <rect x="505" y="40" width="100" height="34" rx="7" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="555" y="62" text-anchor="middle" font-size="13.5" font-weight="650" fill="var(--text-primary)">0.60</text>
+      <!-- activation row -->
+      <rect x="145" y="90" width="100" height="34" rx="7" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="195" y="112" text-anchor="middle" font-size="13.5" fill="var(--text-secondary)">0.10</text>
+      <rect x="265" y="90" width="100" height="34" rx="7" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="315" y="112" text-anchor="middle" font-size="13.5" fill="var(--text-secondary)">1.20</text>
+      <rect x="385" y="90" width="100" height="34" rx="7" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="435" y="112" text-anchor="middle" font-size="13.5" fill="var(--text-secondary)">0.90</text>
+      <rect x="505" y="90" width="100" height="34" rx="7" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="555" y="112" text-anchor="middle" font-size="13.5" fill="var(--text-secondary)">0.20</text>
+      <!-- score row -->
+      <rect x="145" y="140" width="100" height="34" rx="7" fill="var(--surface)" stroke="var(--baseline)" stroke-dasharray="4 3"/>
+      <text x="195" y="162" text-anchor="middle" font-size="13.5" fill="var(--text-muted)">0.08</text>
+      <rect x="265" y="140" width="100" height="34" rx="7" fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1.3"/>
+      <text x="315" y="162" text-anchor="middle" font-size="13.5" font-weight="650" fill="var(--text-primary)">0.36</text>
+      <rect x="385" y="140" width="100" height="34" rx="7" fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1.3"/>
+      <text x="435" y="162" text-anchor="middle" font-size="13.5" font-weight="650" fill="var(--text-primary)">0.45</text>
+      <rect x="505" y="140" width="100" height="34" rx="7" fill="var(--surface)" stroke="var(--baseline)" stroke-dasharray="4 3"/>
+      <text x="555" y="162" text-anchor="middle" font-size="13.5" fill="var(--text-muted)">0.12</text>
+      <!-- verdict row -->
+      <text x="195" y="216" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--critical)">→ 0</text>
+      <text x="315" y="216" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--success-text)">keep</text>
+      <text x="435" y="216" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--success-text)">keep</text>
+      <text x="555" y="216" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--critical)">→ 0</text>
+      <text x="320" y="244" text-anchor="middle" font-size="11.5" fill="var(--text-muted)">the biggest weight (0.80) is pruned anyway — its input channel is nearly silent</text>
+    </g>
+  </svg>
+</div>
+
+<h2>Step 3 — give the sparsity a shape: 2:4</h2>
+<p>Instead of deleting the globally worst 50%, the run walks each weight matrix in groups of
+<strong>4 consecutive input weights and keeps the top-2 scores per group</strong>. This
+"2:4 semi-structured" pattern guarantees exactly 50% sparsity in every pruned layer, and it's
+the specific layout NVIDIA's sparse tensor cores can execute at up to 2× speed — random
+scattered zeros get no such hardware help. The whole scoring-and-masking step is a few tensor
+operations, straight from <code>run_iterative_pruning.py</code>:</p>
+
+<pre><code>score = w.abs() * act_mean            <span class="c"># |W| × mean |x|, per input channel</span>
+groups = score.view(rows, -1, 4)      <span class="c"># groups of 4 along the input dim</span>
+keep = torch.topk(groups, k=2, dim=2).indices
+mask.scatter_(2, keep, True)          <span class="c"># mark the top-2 of each group…</span>
+w.mul_(mask)                          <span class="c"># …and zero the other two, in place</span></code></pre>
+
+<p>Note what pruning is <em>not</em>: no training, no gradients, no labels. One pass of
+calibration statistics, one pass of masking — minutes, not hours.</p>
+
+<h2>Three stages, an exam after each</h2>
+<p>Rather than pruning all MLP matrices at once, the run went <strong>iteratively</strong> —
+first every block's <code>up_proj</code>, then adding <code>gate_proj</code>, then
+<code>down_proj</code> — each stage zeroing exactly half of ~1.88B newly-considered weights,
+and each followed by the full 100-question exam:</p>
+
+<div class="fig">
+  <p class="fig-title">Accuracy vs. how much of the model is zeroed</p>
+  <p class="fig-sub">Correct answers out of 100 at each pruning stage (no recovery training yet)</p>
+  <div class="plot" id="chart-acc"></div>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Stage</th><th>Global sparsity</th><th>Correct / 100</th><th>Δ vs baseline</th></tr>
+      <tr><td>Baseline (dense)</td><td>0%</td><td>74</td><td>—</td></tr>
+      <tr><td>Stage 1 · up_proj</td><td>13.0%</td><td>77</td><td>+3</td></tr>
+      <tr><td>Stage 2 · +gate_proj</td><td>25.9%</td><td>68</td><td>−6</td></tr>
+      <tr><td>Stage 3 · +down_proj</td><td>38.9%</td><td>61</td><td>−13</td></tr>
+    </table>
+  </details>
+</div>
+
+<div class="callout">
+<strong>The stage-1 surprise:</strong> deleting 940 million weights made the score go
+<em>up</em> by 3. Don't celebrate — Chapter 1's calibration says ±4 points is one standard
+error on this exam, and light pruning can also act as mild regularization. The honest reading
+is "up_proj at 50% sparsity is free", not "pruning improves models". By stage 3 the trend is
+unambiguous: −13 points. That damage is what Chapter 3 has to repair.</div>
+
+<h2>What pruning bought — on paper</h2>
+<p>Counting only non-zero weights at 2 bytes each, the model shrank from 13.49 GB of effective
+weight to 8.24 GB — a 39% cut that exactly mirrors the global sparsity:</p>
+
+<div class="fig">
+  <p class="fig-title">Effective weight memory by stage</p>
+  <p class="fig-sub">Non-zero parameters × 2 bytes (fp16) — a paper number, see the caveat below</p>
+  <div class="plot" id="chart-mem"></div>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Stage</th><th>Non-zero params</th><th>Effective GB</th></tr>
+      <tr><td>Baseline</td><td>7,241,732,092</td><td>13.49</td></tr>
+      <tr><td>Stage 1</td><td>6,302,207,996</td><td>11.74</td></tr>
+      <tr><td>Stage 2</td><td>5,362,683,900</td><td>9.99</td></tr>
+      <tr><td>Stage 3</td><td>4,423,159,806</td><td>8.24</td></tr>
+    </table>
+  </details>
+</div>
+
+<div class="callout warn">
+<strong>The dense-storage caveat.</strong> A zeroed weight still occupies its 2 bytes unless
+the storage format or the kernels actually skip zeros. Saved to disk the stage-3 checkpoint is
+as large as the original, and Chapter 4 will measure exactly this: 13.51 GB in fp16 memory
+despite 39% of weights being zero. The 2:4 pattern makes the savings <em>claimable</em> — with
+sparse-aware kernels and storage — but in this pipeline the realized memory win comes from
+quantization. Pruning's contribution here is capacity removed, not bytes saved.</div>
+
+<div class="pager">
+  <a href="01-baseline.html"><span class="dir">← Previous</span> Chapter 1 · The starting point</a>
+  <a class="next" href="03-distillation.html"><span class="dir">Next →</span> Chapter 3 · Distillation</a>
+</div>
+
+<script src="assets/charts.js"></script>
+<script>
+FT.stackedBar(document.getElementById("chart-params").closest(".fig"), {
+  title: "7.24B parameters",
+  ariaLabel: "Stacked bar: MLP layers hold 5.64 billion parameters or 77.8 percent, attention 1.34 billion or 18.5 percent, embeddings and head 0.26 billion or 3.6 percent",
+  outsideLabel: true,
+  segments: [
+    { name: "MLP layers", value: 5637, label: "MLP · 5.64B (77.8%)", color: "var(--series-1)", tipValue: "5.64B (77.8%) — pruned" },
+    { name: "Attention", value: 1342, label: "Attention · 1.34B", color: "var(--series-2)", tipValue: "1.34B (18.5%) — kept dense" },
+    { name: "Embeddings + head", value: 262, label: "Embed · 0.26B", color: "var(--de-emphasis)", ink: "var(--text-primary)", tipValue: "0.26B (3.6%) — kept dense", labelOutside: true }
+  ]
+});
+var STAGE_NAMES = { 0: "Baseline · dense", 12.97: "Stage 1 · up_proj", 25.95: "Stage 2 · +gate_proj", 38.92: "Stage 3 · +down_proj" };
+FT.lineChart(document.getElementById("chart-acc").closest(".fig"), {
+  height: 250,
+  ariaLabel: "Line chart: accuracy is 74 at zero sparsity, 77 at 13 percent, 68 at 26 percent, and 61 at 39 percent global sparsity",
+  xDomain: [-1, 43], yDomain: [50, 90],
+  xTicks: [0, 10, 20, 30, 40], yTicks: [50, 60, 70, 80, 90],
+  xFmt: function (v) { return v + "%"; },
+  xLabel: "global sparsity (share of all 7.24B weights zeroed)",
+  xTooltip: function (x) { return STAGE_NAMES[x] || x + "%"; },
+  yFmt: function (v) { return String(v); },
+  series: [
+    { name: "of 100", color: "var(--series-1)", markers: true,
+      points: [[0,74],[12.97,77],[25.95,68],[38.92,61]] }
+  ],
+  endLabels: true,
+  annotations: [
+    { x: 12.97, y: 82, text: "stage 1: +3 (noise)", anchor: "middle" },
+    { x: 36.5, y: 57, text: "stage 3: −13", anchor: "end" }
+  ]
+});
+FT.barChart(document.getElementById("chart-mem").closest(".fig"), {
+  ariaLabel: "Bar chart: effective weight memory falls from 13.49 gigabytes at baseline to 11.74, 9.99, and 8.24 gigabytes across the three pruning stages",
+  max: 14, labelWidth: 120,
+  bars: [
+    { name: "Baseline", value: 13.49, label: "13.49 GB", tip: "7.24B non-zero weights" },
+    { name: "Stage 1", value: 11.74, label: "11.74 GB", tip: "6.30B non-zero weights" },
+    { name: "Stage 2", value: 9.99, label: "9.99 GB", tip: "5.36B non-zero weights" },
+    { name: "Stage 3", value: 8.24, label: "8.24 GB · −39%", tip: "4.42B non-zero weights" }
+  ]
+});
+</script>
+</div>
+</body>
+</html>

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 1 · The starting point — Compression, visualized</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="site-head">
+  <a class="brand" href="index.html">Compression, visualized <span>· medical 7B case study</span></a>
+  <nav class="site-nav">
+    <a href="index.html">Overview</a>
+    <a href="01-baseline.html" aria-current="page">1 · Baseline</a>
+    <a href="02-pruning.html">2 · Pruning</a>
+    <a href="03-distillation.html">3 · Distillation</a>
+    <a href="04-quantization.html">4 · Quantization</a>
+    <a href="05-results.html">5 · Results</a>
+    <a href="06-deployment.html">6 · Serving</a>
+    <button class="theme-toggle" type="button" aria-label="Switch to dark mode">Dark mode</button>
+  </nav>
+</header>
+
+<p class="kicker">Chapter 1</p>
+<h1>The starting point: a 13.5 GB specialist that scores 74/100</h1>
+<p class="lede">The subject of this pipeline is the finetuned medical checkpoint from the sibling
+walkthrough: <strong>BioMistral-7B</strong> with its medical LoRA adapter merged in — one dense
+model of <strong>7.24 billion weights</strong>, about 13.5 GB at fp16 (16-bit floating point,
+2 bytes per weight). Compression asks a blunt question: how much of that can we throw away
+before the behavior we paid for goes with it?</p>
+
+<div class="tiles">
+  <div class="tile">
+    <div class="label">Parameters</div>
+    <div class="value">7.24<small>B</small></div>
+    <div class="sub">base + medical adapter, merged</div>
+  </div>
+  <div class="tile">
+    <div class="label">Weight memory (fp16)</div>
+    <div class="value">13.5<small> GB</small></div>
+    <div class="sub">2 bytes per weight</div>
+  </div>
+  <div class="tile">
+    <div class="label">Baseline accuracy</div>
+    <div class="value">74<small>/100</small></div>
+    <div class="sub">on the held-out medical test</div>
+  </div>
+  <div class="tile">
+    <div class="label">The exam</div>
+    <div class="value">100<small> questions</small></div>
+    <div class="sub">yes / no / maybe, never trained on</div>
+  </div>
+</div>
+
+<h2>Where this model sits in the lifecycle</h2>
+<p>A model like this passes through stages, each in its own repo in this series. Pretraining
+gave it medical knowledge; finetuning (the sibling walkthrough) gave it its Q&amp;A behavior;
+an alignment stage (DPO/GRPO, in <code>medical-llm-RL</code>) later tuned its preferences —
+and, notably, left held-out test accuracy unchanged. That is why compressing the SFT checkpoint
+is fair game: compression preserves what its input model does, and the aligned model does the
+same thing on this test.</p>
+
+<div class="card" style="overflow-x:auto; padding:16px 8px;">
+  <svg viewBox="0 0 724 100" width="724" height="100" role="img" style="min-width:640px; display:block; margin:0 auto;"
+       aria-label="Lifecycle: pretraining, then finetuning, then alignment, then compression which is this project">
+    <defs>
+      <marker id="arrL" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="var(--baseline)"/>
+      </marker>
+    </defs>
+    <g font-family="system-ui,sans-serif">
+      <rect x="4" y="18" width="156" height="64" rx="9" fill="var(--surface)" stroke="var(--border)" stroke-width="1"/>
+      <text x="82" y="44" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">Pretraining</text>
+      <text x="82" y="62" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">BioMistral-7B · knowledge</text>
+      <line x1="162" y1="50" x2="182" y2="50" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arrL)"/>
+      <rect x="184" y="18" width="156" height="64" rx="9" fill="var(--surface)" stroke="var(--border)" stroke-width="1"/>
+      <text x="262" y="44" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">Finetuning (SFT)</text>
+      <text x="262" y="62" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">QLoRA · sibling repo</text>
+      <line x1="342" y1="50" x2="362" y2="50" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arrL)"/>
+      <rect x="364" y="18" width="156" height="64" rx="9" fill="var(--surface)" stroke="var(--border)" stroke-width="1"/>
+      <text x="442" y="44" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">Alignment</text>
+      <text x="442" y="62" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">DPO / GRPO · score flat</text>
+      <line x1="522" y1="50" x2="542" y2="50" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arrL)"/>
+      <rect x="544" y="18" width="156" height="64" rx="9" fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1.2"/>
+      <text x="622" y="44" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">Compression</text>
+      <text x="622" y="62" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">this walkthrough</text>
+    </g>
+  </svg>
+</div>
+
+<h2>The exam every claim is graded on</h2>
+<p>Compression without measurement is just deletion. Before touching a single weight, the run
+froze an evaluation harness and used it after <em>every</em> step: the same 100 held-out
+PubMedQA questions the model never trained on, the same prompt, greedy decoding (always pick
+the most likely token — no sampling randomness), and a strict grading rule: the first word of
+the answer must be <code>yes</code>, <code>no</code>, or <code>maybe</code> and match the
+reference.</p>
+
+<pre><code><span class="c"># the exact prompt, from all four run scripts</span>
+You are a medical QA assistant. Answer with yes, no, or maybe first,
+then a brief rationale.
+
+<span class="k">Instruction:</span> {the question}
+<span class="k">Context:</span> {the study abstract}
+<span class="k">Answer:</span> <span class="hl">yes</span> …   <span class="c">← only this first word is graded</span></code></pre>
+
+<div class="callout">
+<strong>Calibrate your eyes before reading any chart in this series:</strong> one question is
+one point. On a 100-question exam at this accuracy level, re-rolling the dice moves the score
+by ±4 points quite naturally (one standard error). So a 2-point wiggle between two checkpoints
+means <em>nothing</em>, while the 13-point pruning drop and 18-point distillation rebound you're
+about to see are real signal.</div>
+
+<h2>Why compress at all: the VRAM wall</h2>
+<p>At fp16, just <em>holding</em> this model's weights takes ~13.5 GB of GPU memory — before
+counting activations and the KV cache that inference adds on top. That single number decides
+which hardware can run the model at all. Every byte removed also has to travel from memory to
+compute on every token generated, so smaller models aren't just cheaper to fit — they're
+faster to read.</p>
+
+<div class="fig">
+  <p class="fig-title">Where 13.5 GB of weights fits</p>
+  <p class="fig-sub">fp16 weights vs. common consumer GPU memory sizes</p>
+  <div class="legend">
+    <span class="key"><i class="swatch" style="background:var(--series-1)"></i> This model's weights</span>
+    <span class="key"><i class="swatch" style="background:var(--de-emphasis)"></i> GPU memory tiers</span>
+  </div>
+  <div class="plot" id="chart-vram"></div>
+  <p class="note">Weights are only part of the bill — activations and KV cache come on top, so
+  "fits" here is generous. The pipeline's target, 3.8 GB, fits everywhere on this chart.</p>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Item</th><th>GB</th><th style="text-align:left">Verdict for the fp16 model</th></tr>
+      <tr><td>This model, fp16 weights</td><td>13.49</td><td style="text-align:left">—</td></tr>
+      <tr><td>8 GB GPU (common laptop)</td><td>8</td><td style="text-align:left">doesn't fit</td></tr>
+      <tr><td>12 GB GPU (e.g. RTX 3060)</td><td>12</td><td style="text-align:left">doesn't fit</td></tr>
+      <tr><td>16 GB GPU (e.g. RTX 4080)</td><td>16</td><td style="text-align:left">fits, little headroom</td></tr>
+      <tr><td>24 GB GPU (e.g. RTX 4090)</td><td>24</td><td style="text-align:left">fits</td></tr>
+    </table>
+  </details>
+</div>
+
+<h2>The plan: three moves, in a deliberate order</h2>
+<p>Each technique removes a different kind of fat, and each has a chapter:</p>
+<ol>
+  <li><strong>Prune</strong> (Chapter 2) — delete the individual weights that contribute least,
+  using a score computed from real medical prompts. Removes <em>parameters</em>.</li>
+  <li><strong>Distill</strong> (Chapter 3) — let the original, uncompressed model teach its
+  pruned self to close the quality gap. Restores <em>behavior</em>.</li>
+  <li><strong>Quantize</strong> (Chapter 4) — store every surviving weight in fewer bits.
+  Removes <em>bytes per parameter</em>.</li>
+</ol>
+<p>The success criteria were set before the experiments, not after: accuracy drop within
+1–2% of baseline (which on this 100-question exam means 1–2 points), no new unsafe behavior,
+and a real VRAM reduction. Chapter 5 grades the pipeline against them.</p>
+
+<div class="pager">
+  <a href="index.html"><span class="dir">← Back to</span> Overview</a>
+  <a class="next" href="02-pruning.html"><span class="dir">Next →</span> Chapter 2 · Pruning</a>
+</div>
+
+<script src="assets/charts.js"></script>
+<script>
+FT.barChart(document.getElementById("chart-vram").closest(".fig"), {
+  ariaLabel: "Bar chart: the model's fp16 weights need 13.5 gigabytes; common GPUs offer 8, 12, 16, or 24 gigabytes",
+  max: 26, labelWidth: 190,
+  bars: [
+    { name: "This model, fp16", value: 13.49, label: "13.5 GB", color: "var(--series-1)", tip: "7.24B weights × 2 bytes" },
+    { name: "8 GB GPU (laptop)", value: 8, label: "8 GB", color: "var(--de-emphasis)", tip: "weights alone don't fit" },
+    { name: "12 GB GPU (RTX 3060)", value: 12, label: "12 GB", color: "var(--de-emphasis)", tip: "weights alone don't fit" },
+    { name: "16 GB GPU (RTX 4080)", value: 16, label: "16 GB", color: "var(--de-emphasis)", tip: "fits, little headroom" },
+    { name: "24 GB GPU (RTX 4090)", value: 24, label: "24 GB", color: "var(--de-emphasis)", tip: "fits" }
+  ]
+});
+</script>
+</div>
+</body>
+</html>

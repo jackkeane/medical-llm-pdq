@@ -1,0 +1,84 @@
+{
+  "endpoint": "http://127.0.0.1:8801",
+  "served_model": "medical-7b-compressed",
+  "artifact": "artifacts/awq-w4a16-stage3",
+  "exam": {
+    "total": 100,
+    "correct": 80,
+    "accuracy": 0.8,
+    "wall_seconds": 2.3251612540000224
+  },
+  "throughput": [
+    {
+      "concurrency": 1,
+      "requests": 1,
+      "tokens_per_request": 128,
+      "wall_seconds": 0.846998827333285,
+      "decode_tokens_per_second": 151.1218148943592
+    },
+    {
+      "concurrency": 4,
+      "requests": 4,
+      "tokens_per_request": 128,
+      "wall_seconds": 0.9428957800000717,
+      "decode_tokens_per_second": 543.0080512185144
+    },
+    {
+      "concurrency": 16,
+      "requests": 16,
+      "tokens_per_request": 128,
+      "wall_seconds": 1.6520292069999414,
+      "decode_tokens_per_second": 1239.6875256940132
+    },
+    {
+      "concurrency": 32,
+      "requests": 32,
+      "tokens_per_request": 128,
+      "wall_seconds": 2.3105893760000527,
+      "decode_tokens_per_second": 1772.7078824757423
+    },
+    {
+      "concurrency": 48,
+      "requests": 48,
+      "tokens_per_request": 128,
+      "wall_seconds": 2.906974885000068,
+      "decode_tokens_per_second": 2113.5373517338994
+    },
+    {
+      "concurrency": 64,
+      "requests": 64,
+      "tokens_per_request": 128,
+      "wall_seconds": 21.58608888050003,
+      "decode_tokens_per_second": 379.5036722655354
+    }
+  ],
+  "gpu_memory": {
+    "largest_process_mib": 0,
+    "gpu_total_used_mib": 24038
+  },
+  "server_log_facts": {
+    "weights_gib": 3.88,
+    "weights_load_seconds": 3.587943,
+    "kv_cache_gib": 17.36,
+    "kv_cache_tokens": 142208,
+    "engine_init_seconds": 21.45
+  },
+  "footprint_comparison": {
+    "note": "Same RTX 4090 (24 GiB), same --max-model-len 4096, vLLM 0.15.1. fp16 row serves artifacts/iterative-wanda-2of4-distilled-merged/stage3_add_down_proj; awq row serves artifacts/awq-w4a16-stage3.",
+    "awq_w4a16": {
+      "weights_gib": 3.88,
+      "weights_load_seconds": 3.59,
+      "kv_cache_gib": 17.36,
+      "kv_cache_tokens": 142208,
+      "concurrent_4k_contexts": 34.7
+    },
+    "fp16_dense": {
+      "weights_gib": 13.5,
+      "weights_load_seconds": 9.34,
+      "kv_cache_gib": 7.75,
+      "kv_cache_tokens": 63456,
+      "concurrent_4k_contexts": 15.5
+    },
+    "kv_cache_capacity_ratio": 2.24
+  }
+}

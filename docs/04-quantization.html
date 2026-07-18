@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 4 · Quantization — Compression, visualized</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="site-head">
+  <a class="brand" href="index.html">Compression, visualized <span>· medical 7B case study</span></a>
+  <nav class="site-nav">
+    <a href="index.html">Overview</a>
+    <a href="01-baseline.html">1 · Baseline</a>
+    <a href="02-pruning.html">2 · Pruning</a>
+    <a href="03-distillation.html">3 · Distillation</a>
+    <a href="04-quantization.html" aria-current="page">4 · Quantization</a>
+    <a href="05-results.html">5 · Results</a>
+    <a href="06-deployment.html">6 · Serving</a>
+    <button class="theme-toggle" type="button" aria-label="Switch to dark mode">Dark mode</button>
+  </nav>
+</header>
+
+<p class="kicker">Chapter 4</p>
+<h1>Quantization: the same weights in a quarter of the bits</h1>
+<p class="lede">Pruning chose <em>which</em> weights survive; quantization shrinks <em>how many
+bits</em> each survivor occupies. The distilled stage-3 checkpoint was benchmarked three ways —
+fp16, INT8, and NF4 4-bit — same exam, same prompts. The result: <strong>3.79 GB (−72%)
+at 81/100</strong>, with no measurable accuracy cost. This is where the pipeline's memory win
+actually lands.</p>
+
+<h2>Fewer bits per weight</h2>
+<p>A weight is just a stored number, and the storage format is a dial. fp16 spends 16 bits on
+each of the 7.24 billion weights; INT8 rounds them to 8-bit integers; NF4 packs them into
+4-bit codes. Halve the bits, halve the model:</p>
+
+<div class="card" style="overflow-x:auto; padding:18px 10px 10px;">
+  <svg viewBox="0 0 660 196" width="660" height="196" role="img" style="min-width:560px; display:block; margin:0 auto;"
+       aria-label="Diagram: one weight stored in fp16 occupies 16 bits, in INT8 eight bits, in NF4 four bits plus small shared block constants; across 7.24 billion weights that is 13.5, 7.0, and 3.8 gigabytes as measured">
+    <g font-family="system-ui,sans-serif">
+      <text x="330" y="16" text-anchor="middle" font-size="13" font-weight="650" fill="var(--text-primary)">One weight, three storage formats</text>
+      <!-- fp16: 16 squares of 15px + 3 gap = 285 wide, start x=120 -->
+      <text x="8" y="55" font-size="12.5" fill="var(--text-secondary)">fp16</text>
+      <g fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1">
+        <rect x="120" y="38" width="15" height="22" rx="3"/><rect x="138" y="38" width="15" height="22" rx="3"/><rect x="156" y="38" width="15" height="22" rx="3"/><rect x="174" y="38" width="15" height="22" rx="3"/>
+        <rect x="192" y="38" width="15" height="22" rx="3"/><rect x="210" y="38" width="15" height="22" rx="3"/><rect x="228" y="38" width="15" height="22" rx="3"/><rect x="246" y="38" width="15" height="22" rx="3"/>
+        <rect x="264" y="38" width="15" height="22" rx="3"/><rect x="282" y="38" width="15" height="22" rx="3"/><rect x="300" y="38" width="15" height="22" rx="3"/><rect x="318" y="38" width="15" height="22" rx="3"/>
+        <rect x="336" y="38" width="15" height="22" rx="3"/><rect x="354" y="38" width="15" height="22" rx="3"/><rect x="372" y="38" width="15" height="22" rx="3"/><rect x="390" y="38" width="15" height="22" rx="3"/>
+      </g>
+      <text x="418" y="54" font-size="12" fill="var(--text-secondary)">16 bits</text>
+      <text x="530" y="54" font-size="12" fill="var(--text-muted)">× 7.24B = 13.5 GB</text>
+      <!-- int8 -->
+      <text x="8" y="112" font-size="12.5" fill="var(--text-secondary)">INT8</text>
+      <g fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1">
+        <rect x="120" y="95" width="15" height="22" rx="3"/><rect x="138" y="95" width="15" height="22" rx="3"/><rect x="156" y="95" width="15" height="22" rx="3"/><rect x="174" y="95" width="15" height="22" rx="3"/>
+        <rect x="192" y="95" width="15" height="22" rx="3"/><rect x="210" y="95" width="15" height="22" rx="3"/><rect x="228" y="95" width="15" height="22" rx="3"/><rect x="246" y="95" width="15" height="22" rx="3"/>
+      </g>
+      <text x="274" y="111" font-size="12" fill="var(--text-secondary)">8 bits</text>
+      <text x="530" y="111" font-size="12" fill="var(--text-muted)">× 7.24B = 7.0 GB*</text>
+      <!-- nf4 -->
+      <text x="8" y="169" font-size="12.5" fill="var(--text-secondary)">NF4</text>
+      <g fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1">
+        <rect x="120" y="152" width="15" height="22" rx="3"/><rect x="138" y="152" width="15" height="22" rx="3"/><rect x="156" y="152" width="15" height="22" rx="3"/><rect x="174" y="152" width="15" height="22" rx="3"/>
+      </g>
+      <text x="202" y="168" font-size="12" fill="var(--text-secondary)">4 bits + shared block constants</text>
+      <text x="530" y="168" font-size="12" fill="var(--text-muted)">× 7.24B = 3.8 GB*</text>
+      <text x="330" y="192" text-anchor="middle" font-size="11" fill="var(--text-muted)">* totals as measured by the benchmark — includes each format's real overhead</text>
+    </g>
+  </svg>
+</div>
+
+<p>The two compressed formats are smarter than plain rounding, which is why so little quality
+is lost. <strong>INT8</strong> (bitsandbytes' LLM.int8) keeps the rare outlier channels — the
+values that would be mangled by rounding — in fp16 on the side. <strong>NF4</strong>
+(NormalFloat4) chooses its 16 levels to match the bell-curve distribution real weights follow,
+and dequantizes each block back to bf16 just-in-time for the actual math. It is the same
+format QLoRA used for <em>training</em> in the sibling walkthrough — and the same one the
+student was distilled in (Chapter 3), so the deployed model is evaluated exactly as it was
+repaired.</p>
+
+<h2>The benchmark: memory</h2>
+<div class="fig">
+  <p class="fig-title">Measured memory footprint of the distilled stage-3 model</p>
+  <p class="fig-sub">transformers' get_memory_footprint(), same checkpoint, three load modes</p>
+  <div class="plot" id="chart-mem"></div>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Format</th><th>Memory</th><th>vs fp16</th></tr>
+      <tr><td>fp16</td><td>13.51 GB</td><td>—</td></tr>
+      <tr><td>INT8</td><td>7.04 GB</td><td>−47.9%</td></tr>
+      <tr><td>NF4 (4-bit)</td><td>3.79 GB</td><td>−72.0%</td></tr>
+    </table>
+  </details>
+</div>
+
+<div class="callout warn">
+<strong>Notice what fp16 says: 13.51 GB — the full dense size.</strong> This is Chapter 2's
+caveat, now measured: 39% of these weights are zeros, and dense storage charges for them
+anyway. The 3.79 GB NF4 figure doesn't exploit the sparsity either — it's pure
+bits-per-weight. A 2:4-sparse <em>and</em> 4-bit format would stack the two savings; that
+remains on this project's to-do list.</div>
+
+<h2>The benchmark: accuracy</h2>
+<div class="fig">
+  <p class="fig-title">Same exam, three storage formats</p>
+  <p class="fig-sub">Correct answers out of 100, distilled stage-3 checkpoint</p>
+  <div class="plot" id="chart-acc"></div>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Format</th><th>Correct / 100</th><th>Δ vs fp16</th></tr>
+      <tr><td>fp16</td><td>79</td><td>—</td></tr>
+      <tr><td>INT8</td><td>81</td><td>+2</td></tr>
+      <tr><td>NF4 (4-bit)</td><td>81</td><td>+2</td></tr>
+    </table>
+  </details>
+</div>
+
+<div class="callout">
+<strong>The 4-bit model "beat" fp16 by two points. It didn't, really.</strong> Two samples on a
+100-question exam is inside the noise band from Chapter 1. The honest headline — and it's a
+good one — is that dropping from 16 bits to 4 cost <em>nothing measurable</em>, while cutting
+memory 72%. When quality is flat, the cheapest format wins: <strong>NF4</strong>.</div>
+
+<h2>Postscript: the AWQ rematch</h2>
+<p>The original plan called for <strong>AWQ</strong> (activation-aware weight quantization —
+it scales important channels before rounding so they survive it, a spiritual cousin of Wanda's
+scoring). The package wasn't available in the environment at benchmark time, so the run
+shipped on bitsandbytes — and a later follow-up closed the gap: the distilled stage-3 model,
+LoRA merged in, quantized to AWQ W4A16 via <code>llm-compressor</code>.</p>
+
+<table class="data">
+  <tr><th>4-bit format</th><th>Correct / 100</th><th style="text-align:left">Note</th></tr>
+  <tr><td>NF4 (bitsandbytes)</td><td>81</td><td style="text-align:left">the incumbent</td></tr>
+  <tr><td>AWQ W4A16 (llm-compressor)</td><td>80</td><td style="text-align:left">1 sample behind — a tie, statistically</td></tr>
+</table>
+
+<p>The two loaders' memory readouts aren't comparable (different backends account differently
+— the AWQ path even <em>reports</em> a larger footprint than fp16, an accounting artifact, not
+physics), so the comparison rests on accuracy and ecosystem fit. Verdict, from the report
+itself: <strong>keep NF4 as the default</strong>; reach for AWQ only when a serving stack
+specifically requires that format.</p>
+
+<div class="pager">
+  <a href="03-distillation.html"><span class="dir">← Previous</span> Chapter 3 · Distillation</a>
+  <a class="next" href="05-results.html"><span class="dir">Next →</span> Chapter 5 · The scorecard</a>
+</div>
+
+<script src="assets/charts.js"></script>
+<script>
+FT.barChart(document.getElementById("chart-mem").closest(".fig"), {
+  ariaLabel: "Bar chart: the model occupies 13.51 gigabytes in fp16, 7.04 in INT8, and 3.79 in NF4 4-bit",
+  max: 14, labelWidth: 120,
+  bars: [
+    { name: "fp16", value: 13.514, label: "13.51 GB", tip: "16 bits per weight, dense" },
+    { name: "INT8", value: 7.040, label: "7.04 GB · −47.9%", tip: "8-bit + fp16 outlier channels" },
+    { name: "NF4 · 4-bit", value: 3.790, label: "3.79 GB · −72%", tip: "4-bit + block constants" }
+  ]
+});
+FT.barChart(document.getElementById("chart-acc").closest(".fig"), {
+  ariaLabel: "Bar chart: 79 correct answers out of 100 at fp16, 81 at INT8, 81 at NF4 — differences within noise",
+  max: 100, labelWidth: 120,
+  bars: [
+    { name: "fp16", value: 79, label: "79 / 100", tip: "reference precision" },
+    { name: "INT8", value: 81, label: "81 / 100", tip: "+2 vs fp16 — within noise" },
+    { name: "NF4 · 4-bit", value: 81, label: "81 / 100", tip: "+2 vs fp16 — within noise" }
+  ]
+});
+</script>
+</div>
+</body>
+</html>

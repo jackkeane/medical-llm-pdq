@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compression, visualized — a real prune·distill·quantize run explained</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="site-head">
+  <a class="brand" href="index.html">Compression, visualized <span>· medical 7B case study</span></a>
+  <nav class="site-nav">
+    <a href="index.html" aria-current="page">Overview</a>
+    <a href="01-baseline.html">1 · Baseline</a>
+    <a href="02-pruning.html">2 · Pruning</a>
+    <a href="03-distillation.html">3 · Distillation</a>
+    <a href="04-quantization.html">4 · Quantization</a>
+    <a href="05-results.html">5 · Results</a>
+    <a href="06-deployment.html">6 · Serving</a>
+    <button class="theme-toggle" type="button" aria-label="Switch to dark mode">Dark mode</button>
+  </nav>
+</header>
+
+<h1>How a finetuned LLM gets compressed — shown with a real run</h1>
+<p class="lede">This walkthrough explains model compression using an actual pipeline run:
+<strong>pruning</strong> (delete weights), <strong>distillation</strong> (repair the damage),
+and <strong>quantization</strong> (shrink what's left), applied in that order to a finetuned
+medical 7B model on a single consumer GPU. The starting checkpoint is the one trained in the
+sibling walkthrough <a href="../../medical-llm/docs/index.html">Finetuning, visualized</a>.
+Every chart on these pages is drawn from the run's real report files — including the stage
+where accuracy fell off a cliff.</p>
+
+<div class="tiles">
+  <div class="tile">
+    <div class="label">Deployed size</div>
+    <div class="value">3.79<small> GB</small></div>
+    <div class="sub">was 13.51 GB in fp16 · <span class="delta-good">−72%</span></div>
+  </div>
+  <div class="tile">
+    <div class="label">Final accuracy</div>
+    <div class="value">81<small>/100</small></div>
+    <div class="sub"><span class="delta-good">no loss</span> vs 74/100 before compression</div>
+  </div>
+  <div class="tile">
+    <div class="label">Weights zeroed</div>
+    <div class="value">2.82<small>B</small></div>
+    <div class="sub">38.9% of all 7.24B parameters</div>
+  </div>
+  <div class="tile">
+    <div class="label">Repair training</div>
+    <div class="value">240<small> steps</small></div>
+    <div class="sub">teacher-guided distillation, 80/stage</div>
+  </div>
+</div>
+
+<h2>The pipeline at a glance</h2>
+<p>Compression is a three-move sequence, and the order matters: pruning creates damage,
+distillation repairs it, quantization compresses the repaired result. Rounded
+<span style="color:var(--series-1);font-weight:600">tinted boxes</span> are checkpoints
+(model files you can load); plain boxes are processing steps. After every step the model
+retakes the same 100-question exam, so nothing is claimed without a measurement.</p>
+
+<div class="card" style="overflow-x:auto; padding:16px 8px;">
+  <svg viewBox="0 0 1150 96" width="1150" height="96" role="img" aria-label="Pipeline: SFT checkpoint, pruning, pruned model, distillation, distilled model, quantization, deployable model">
+    <defs>
+      <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="var(--baseline)"/>
+      </marker>
+    </defs>
+    <g font-family="system-ui,sans-serif">
+      <!-- 1 SFT checkpoint (artifact) -->
+      <rect x="4" y="18" width="140" height="58" rx="9" fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1"/>
+      <text x="74" y="42" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">SFT checkpoint</text>
+      <text x="74" y="60" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">13.5 GB · 74/100</text>
+      <line x1="146" y1="47" x2="168" y2="47" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <!-- 2 prune -->
+      <rect x="170" y="18" width="140" height="58" rx="9" fill="var(--surface)" stroke="var(--border)" stroke-width="1"/>
+      <text x="240" y="42" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">Prune</text>
+      <text x="240" y="60" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">Wanda 2:4 · 3 stages</text>
+      <line x1="312" y1="47" x2="334" y2="47" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <!-- 3 pruned model (artifact) -->
+      <rect x="336" y="18" width="140" height="58" rx="9" fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1"/>
+      <text x="406" y="42" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">Pruned model</text>
+      <text x="406" y="60" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">39% zeros · 61/100</text>
+      <line x1="478" y1="47" x2="500" y2="47" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <!-- 4 distill -->
+      <rect x="502" y="18" width="140" height="58" rx="9" fill="var(--surface)" stroke="var(--border)" stroke-width="1"/>
+      <text x="572" y="42" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">Distill</text>
+      <text x="572" y="60" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">teacher · 80 steps/stage</text>
+      <line x1="644" y1="47" x2="666" y2="47" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <!-- 5 distilled (artifact) -->
+      <rect x="668" y="18" width="140" height="58" rx="9" fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1"/>
+      <text x="738" y="42" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">Distilled model</text>
+      <text x="738" y="60" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">recovered · 80/100</text>
+      <line x1="810" y1="47" x2="832" y2="47" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <!-- 6 quantize -->
+      <rect x="834" y="18" width="140" height="58" rx="9" fill="var(--surface)" stroke="var(--border)" stroke-width="1"/>
+      <text x="904" y="42" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">Quantize</text>
+      <text x="904" y="60" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">fp16 → NF4 4-bit</text>
+      <line x1="976" y1="47" x2="998" y2="47" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <!-- 7 deployable (artifact) -->
+      <rect x="1000" y="18" width="140" height="58" rx="9" fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1"/>
+      <text x="1070" y="42" text-anchor="middle" font-size="13" font-weight="640" fill="var(--text-primary)">Deployable</text>
+      <text x="1070" y="60" text-anchor="middle" font-size="11.5" fill="var(--text-secondary)">3.8 GB · 81/100</text>
+    </g>
+  </svg>
+</div>
+
+<h2>The run in one picture</h2>
+<p>Accuracy on the same held-out 100-question medical exam, measured after every step.
+Pruning alone cost 13 points by the final stage; distillation won them all back and then some;
+quantization to 4-bit cost nothing measurable. The dip <em>and</em> the recovery are the whole
+story of this walkthrough.</p>
+
+<div class="fig">
+  <p class="fig-title">Accuracy through the pipeline</p>
+  <p class="fig-sub">Correct answers on the 100-question held-out test, after each step</p>
+  <div class="plot" id="chart-teaser"></div>
+  <p class="note">Differences of a couple of points are noise on a 100-question exam
+  (Chapter 5 quantifies this); the 13-point dip and 18-point rebound are the signal.</p>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Checkpoint</th><th>Correct / 100</th><th>Δ vs baseline</th></tr>
+      <tr><td>SFT baseline</td><td>74</td><td>—</td></tr>
+      <tr><td>Pruning stage 1 (up_proj)</td><td>77</td><td>+3</td></tr>
+      <tr><td>Pruning stage 2 (+gate_proj)</td><td>68</td><td>−6</td></tr>
+      <tr><td>Pruning stage 3 (+down_proj)</td><td>61</td><td>−13</td></tr>
+      <tr><td>After distillation (stage 3)</td><td>80</td><td>+6</td></tr>
+      <tr><td>Quantized NF4 (deployed)</td><td>81</td><td>+7</td></tr>
+    </table>
+  </details>
+</div>
+
+<h2>Chapters</h2>
+<ol class="chapters">
+  <li><a href="01-baseline.html">
+    <span class="num">CHAPTER 1</span>
+    <span class="t">The starting point</span>
+    What we're compressing, the 100-question exam every claim is graded on, and why a 13.5 GB model is hard to deploy.
+  </a></li>
+  <li><a href="02-pruning.html">
+    <span class="num">CHAPTER 2</span>
+    <span class="t">Pruning, explained visually</span>
+    Wanda scoring and 2:4 sparsity: how 2.8 billion weights were chosen for deletion — and what it cost.
+  </a></li>
+  <li><a href="03-distillation.html">
+    <span class="num">CHAPTER 3</span>
+    <span class="t">Distillation: the repair</span>
+    The original model teaches its pruned self. Accuracy climbs from 62 back to 80 in 80 steps.
+  </a></li>
+  <li><a href="04-quantization.html">
+    <span class="num">CHAPTER 4</span>
+    <span class="t">Quantization</span>
+    fp16 vs INT8 vs NF4, measured — plus the AWQ postscript and a caveat about counting zeros.
+  </a></li>
+  <li><a href="05-results.html">
+    <span class="num">CHAPTER 5</span>
+    <span class="t">The scorecard</span>
+    The honest final tally, every number's provenance, the caveats, and what to try next.
+  </a></li>
+  <li><a href="06-deployment.html">
+    <span class="num">CHAPTER 6</span>
+    <span class="t">Serving</span>
+    The 3.8 GB model behind a real vLLM API: how fast it loads, and how compression buys 2.2× the room to serve.
+  </a></li>
+</ol>
+
+<h2>Where the numbers come from</h2>
+<p>This is a real project, not a mock-up. Four runnable scripts produced machine-readable
+reports, and each chapter cites its sources:</p>
+<ul>
+  <li><code>reports/iterative_pruning_metrics.json</code> — accuracy and sparsity after each pruning stage</li>
+  <li><code>reports/iterative_distillation_metrics.json</code> — before/after accuracy per distilled stage</li>
+  <li><code>reports/quantization_step_metrics.json</code> — fp16 / INT8 / NF4 accuracy and memory footprint</li>
+  <li><code>reports/awq_vs_nf4_comparison.md</code> — the later AWQ-vs-NF4 head-to-head</li>
+  <li><code>reports/vllm_serving_metrics.json</code> — serving throughput, memory footprint, and the exam re-run over the API (Chapter 6)</li>
+  <li><code>run_iterative_pruning.py</code>, <code>run_iterative_distillation.py</code>,
+      <code>run_quantization_step.py</code>, <code>run_awq_quantization_step.py</code>,
+      <code>serve_vllm.sh</code>, <code>run_vllm_serving_benchmark.py</code> — the code itself</li>
+</ul>
+
+<p class="foot">Case study: the BioMistral-7B medical SFT checkpoint from
+<a href="../../medical-llm/docs/index.html">Finetuning, visualized</a> (link works when the two
+repos sit side by side), compressed March 2026 with Wanda 2:4 pruning, teacher–student
+distillation, and bitsandbytes quantization. The model answers medical questions and is for
+education and research only — never for clinical use. The subject of these pages is the
+<em>compression process</em>, not medical advice.</p>
+
+<script src="assets/charts.js"></script>
+<script>
+var STEPS = ["SFT", "prune 1", "prune 2", "prune 3", "distill", "NF4"];
+var STEPS_LONG = ["SFT checkpoint (baseline)", "Pruning stage 1 · up_proj", "Pruning stage 2 · +gate_proj",
+                  "Pruning stage 3 · +down_proj", "After distillation (stage 3)", "Quantized NF4 (deployed)"];
+FT.lineChart(document.getElementById("chart-teaser").closest(".fig"), {
+  height: 250,
+  ariaLabel: "Line chart: accuracy starts at 74, rises to 77 after pruning stage 1, falls to 68 then 61 across pruning stages 2 and 3, recovers to 80 after distillation, ends at 81 after NF4 quantization",
+  xDomain: [-0.25, 5.4], yDomain: [50, 90],
+  xTicks: [0, 1, 2, 3, 4, 5], yTicks: [50, 60, 70, 80, 90],
+  xFmt: function (v) { return STEPS[v]; },
+  xTooltip: function (x) { return STEPS_LONG[x]; },
+  yFmt: function (v) { return String(v); },
+  series: [
+    { name: "of 100", color: "var(--series-1)", markers: true,
+      points: [[0,74],[1,77],[2,68],[3,61],[4,80],[5,81]] }
+  ],
+  endLabels: true,
+  annotations: [
+    { x: 1.75, y: 57, text: "pruning digs a hole", anchor: "middle" },
+    { x: 3.9, y: 86.5, text: "distillation climbs out", anchor: "middle" }
+  ]
+});
+</script>
+</div>
+</body>
+</html>

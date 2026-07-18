@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 3 · Distillation: the repair — Compression, visualized</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="site-head">
+  <a class="brand" href="index.html">Compression, visualized <span>· medical 7B case study</span></a>
+  <nav class="site-nav">
+    <a href="index.html">Overview</a>
+    <a href="01-baseline.html">1 · Baseline</a>
+    <a href="02-pruning.html">2 · Pruning</a>
+    <a href="03-distillation.html" aria-current="page">3 · Distillation</a>
+    <a href="04-quantization.html">4 · Quantization</a>
+    <a href="05-results.html">5 · Results</a>
+    <a href="06-deployment.html">6 · Serving</a>
+    <button class="theme-toggle" type="button" aria-label="Switch to dark mode">Dark mode</button>
+  </nav>
+</header>
+
+<p class="kicker">Chapter 3</p>
+<h1>Distillation: the model it used to be teaches the model it became</h1>
+<p class="lede">Pruning left the stage-3 model 13 points worse. <strong>Knowledge
+distillation</strong> repairs it by putting the original, uncompressed checkpoint beside the
+pruned one: on every training example the pruned <em>student</em> is trained to match the
+<em>teacher's</em> full output distribution, not just the right answer. Eighty steps per stage
+later, the most damaged model had climbed from 62 to <strong>80/100</strong>.</p>
+
+<h2>Why copy a teacher instead of just re-training?</h2>
+<p>A training label carries one fact: "the answer is <em>yes</em>." The teacher's output
+carries much more: <em>how confident</em> yes should be, whether <em>maybe</em> was a close
+second, which phrasings are plausible next tokens. Matching that whole probability
+distribution — the field calls it <em>dark knowledge</em> — gives the student a far denser
+training signal per example, which is exactly what you want when repairing damage with only
+800 examples and 80 optimizer steps. A <strong>temperature</strong> of T&nbsp;=&nbsp;2 softens
+both distributions (divides the logits before softmax) so the runner-up probabilities become
+visible enough to learn from.</p>
+
+<div class="card" style="overflow-x:auto; padding:18px 10px;">
+  <svg viewBox="0 0 700 250" width="700" height="250" role="img" style="min-width:600px; display:block; margin:0 auto;"
+       aria-label="Diagram: a batch of medical Q&A flows into both the teacher (the original dense model, fp32 on CPU) and the student (the pruned model in 4-bit with a small LoRA adapter). The teacher produces soft targets; the loss combines cross-entropy on the labels with KL divergence against the teacher, and only the student's LoRA weights are updated">
+    <defs>
+      <marker id="arrD" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="var(--baseline)"/>
+      </marker>
+    </defs>
+    <g font-family="system-ui,sans-serif">
+      <!-- batch -->
+      <rect x="8" y="97" width="128" height="56" rx="9" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="72" y="120" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--text-primary)">Training batch</text>
+      <text x="72" y="138" text-anchor="middle" font-size="11" fill="var(--text-secondary)">800 medical Q&amp;A</text>
+      <!-- arrows to teacher & student -->
+      <line x1="136" y1="112" x2="162" y2="112" stroke="var(--baseline)" stroke-width="1.5"/>
+      <line x1="162" y1="112" x2="162" y2="50" stroke="var(--baseline)" stroke-width="1.5"/>
+      <line x1="162" y1="50" x2="196" y2="50" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arrD)"/>
+      <line x1="136" y1="138" x2="162" y2="138" stroke="var(--baseline)" stroke-width="1.5"/>
+      <line x1="162" y1="138" x2="162" y2="200" stroke="var(--baseline)" stroke-width="1.5"/>
+      <line x1="162" y1="200" x2="196" y2="200" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arrD)"/>
+      <!-- teacher -->
+      <rect x="198" y="18" width="216" height="64" rx="9" fill="var(--surface)" stroke="var(--baseline)" stroke-width="1.2"/>
+      <text x="306" y="42" text-anchor="middle" font-size="13.5" font-weight="650" fill="var(--text-primary)">Teacher ❄ · original model</text>
+      <text x="306" y="62" text-anchor="middle" font-size="11" fill="var(--text-secondary)">dense 7.24B · fp32 · runs on CPU</text>
+      <!-- student -->
+      <rect x="198" y="168" width="216" height="64" rx="9" fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1.2"/>
+      <text x="306" y="192" text-anchor="middle" font-size="13.5" font-weight="650" fill="var(--text-primary)">Student · pruned model</text>
+      <text x="306" y="212" text-anchor="middle" font-size="11" fill="var(--text-secondary)">2:4 zeros · NF4 · LoRA r=16 · GPU</text>
+      <!-- arrows to loss -->
+      <line x1="414" y1="50" x2="470" y2="50" stroke="var(--baseline)" stroke-width="1.5"/>
+      <line x1="470" y1="50" x2="470" y2="96" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arrD)"/>
+      <text x="482" y="76" text-anchor="start" font-size="11" fill="var(--text-secondary)">soft targets (T=2)</text>
+      <line x1="414" y1="200" x2="470" y2="200" stroke="var(--baseline)" stroke-width="1.5"/>
+      <line x1="470" y1="200" x2="470" y2="154" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arrD)"/>
+      <text x="482" y="184" text-anchor="start" font-size="11" fill="var(--text-secondary)">its own predictions</text>
+      <!-- loss box -->
+      <rect x="418" y="98" width="274" height="54" rx="9" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="555" y="121" text-anchor="middle" font-size="13" font-weight="650" fill="var(--text-primary)">loss = 0.6·CE + 0.4·KL·T²</text>
+      <text x="555" y="139" text-anchor="middle" font-size="11" fill="var(--text-secondary)">gradients update the student's LoRA only</text>
+    </g>
+  </svg>
+</div>
+
+<p>The loss is a weighted blend, straight from <code>run_iterative_distillation.py</code>:</p>
+
+<pre><code>loss = <span class="k">0.6</span> * CE(student, labels)              <span class="c"># stay correct on the data</span>
+     + <span class="k">0.4</span> * KL(teacher/T ‖ student/T) * T²  <span class="c"># match the teacher's distribution, T = 2</span>
+
+<span class="c"># per stage: 80 steps · AdamW, lr 1e-4 · batch 1 · 512 tokens</span>
+<span class="c"># same 800 medical training samples the original finetune used</span></code></pre>
+
+<div class="callout">
+<strong>The detail that makes this work: the zeros must survive training.</strong> Naively
+finetuning a pruned model un-prunes it — gradient updates write new values over the zeros.
+Here the student's pruned weights are <em>frozen</em> (loaded in 4-bit NF4, exactly like QLoRA
+in the sibling walkthrough) and all learning flows through a small fresh
+<strong>LoRA adapter (r=16) attached only to the attention projections</strong> — layers that
+were never pruned. The MLPs receive no updates, so training cannot un-prune them — the 2:4 sparsity survives intact.
+Bonus: the trainable set is tiny, so 80 repair steps are cheap. And with the fp32 teacher
+running on the CPU while the 4-bit student trains on the GPU, the whole two-model setup fits
+one consumer machine.</div>
+
+<h2>The results: the most damaged student gained the most</h2>
+<p>Each pruning stage got its own distillation pass. "Before" is the pruned student re-scored
+in its 4-bit training setup — which is why stage 1 reads 72 here, not Chapter 2's 77:
+quantized evaluation wobbles the number a little (Chapter 5 tables every variant).</p>
+
+<div class="fig">
+  <p class="fig-title">Accuracy before and after distillation, per pruning stage</p>
+  <p class="fig-sub">Correct answers out of 100 · 80 distillation steps per stage</p>
+  <div class="legend">
+    <span class="key"><i style="background:var(--series-1)"></i> Before (pruned, 4-bit)</span>
+    <span class="key"><i style="background:var(--series-2)"></i> After distillation</span>
+  </div>
+  <div class="plot" id="chart-distill"></div>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Stage</th><th>Before</th><th>After</th><th>Δ</th></tr>
+      <tr><td>Stage 1 · up_proj (13% sparse)</td><td>72</td><td>78</td><td>+6</td></tr>
+      <tr><td>Stage 2 · +gate_proj (26% sparse)</td><td>67</td><td>74</td><td>+7</td></tr>
+      <tr><td>Stage 3 · +down_proj (39% sparse)</td><td>62</td><td>80</td><td>+18</td></tr>
+    </table>
+  </details>
+</div>
+
+<p>The pattern is the textbook one: the deeper the pruning damage, the more the teacher has to
+offer. Stage 3 — the model that lost the most — recovered <strong>+18 points</strong> and ended
+at 80/100, six above the original dense baseline of 74. That made it the obvious candidate to
+carry into quantization: maximum sparsity <em>and</em> top score.</p>
+
+<div class="callout">
+<strong>Can a pruned model really beat its own baseline?</strong> Be skeptical with the run,
+not for it. Three honest ingredients: ±4 points of exam noise (Chapter 1), distillation's
+regularizing effect on a small dataset, and the fact that the student got 80 extra steps of
+medical training the baseline never had. The defensible claim is <em>full recovery at 39%
+sparsity</em> — which is remarkable enough — not "pruning made it smarter".</div>
+
+<div class="pager">
+  <a href="02-pruning.html"><span class="dir">← Previous</span> Chapter 2 · Pruning</a>
+  <a class="next" href="04-quantization.html"><span class="dir">Next →</span> Chapter 4 · Quantization</a>
+</div>
+
+<script src="assets/charts.js"></script>
+<script>
+var STAGE_LABEL = { 1: "Stage 1 · up_proj", 2: "Stage 2 · +gate_proj", 3: "Stage 3 · +down_proj" };
+FT.lineChart(document.getElementById("chart-distill").closest(".fig"), {
+  height: 250,
+  ariaLabel: "Line chart: before distillation the three pruned stages score 72, 67, and 62; after distillation they score 78, 74, and 80. Stage 3 gains 18 points",
+  xDomain: [0.75, 3.4], yDomain: [50, 90],
+  xTicks: [1, 2, 3], yTicks: [50, 60, 70, 80, 90],
+  xFmt: function (v) { return "stage " + v; },
+  xTooltip: function (x) { return STAGE_LABEL[x]; },
+  yFmt: function (v) { return String(v); },
+  series: [
+    { name: "before", color: "var(--series-1)", markers: true, points: [[1,72],[2,67],[3,62]] },
+    { name: "after", color: "var(--series-2)", markers: true, points: [[1,78],[2,74],[3,80]] }
+  ],
+  endLabels: true,
+  annotations: [
+    { x: 3, y: 71, dx: 14, text: "+18", anchor: "start" },
+    { x: 1.5, y: 82, text: "recovered", anchor: "middle" },
+    { x: 1.5, y: 63.5, text: "pruning damage", anchor: "middle" }
+  ]
+});
+</script>
+</div>
+</body>
+</html>

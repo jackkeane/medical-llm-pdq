@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 5 · The scorecard — Compression, visualized</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="site-head">
+  <a class="brand" href="index.html">Compression, visualized <span>· medical 7B case study</span></a>
+  <nav class="site-nav">
+    <a href="index.html">Overview</a>
+    <a href="01-baseline.html">1 · Baseline</a>
+    <a href="02-pruning.html">2 · Pruning</a>
+    <a href="03-distillation.html">3 · Distillation</a>
+    <a href="04-quantization.html">4 · Quantization</a>
+    <a href="05-results.html" aria-current="page">5 · Results</a>
+    <a href="06-deployment.html">6 · Serving</a>
+    <button class="theme-toggle" type="button" aria-label="Switch to dark mode">Dark mode</button>
+  </nav>
+</header>
+
+<p class="kicker">Chapter 5</p>
+<h1>The scorecard: 81/100 at 28% of the memory</h1>
+<p class="lede">End to end, the pipeline turned a 13.5 GB fp16 checkpoint scoring 74/100 into a
+<strong>3.79 GB</strong> NF4 artifact scoring <strong>81/100</strong> — with 39% of its weights
+zeroed and its behavior repaired by its own former self. This chapter tallies the result
+honestly: every number's provenance, the caveats that survive scrutiny, and what a learner
+should try next.</p>
+
+<h2>The whole journey, one line</h2>
+<div class="fig">
+  <p class="fig-title">Accuracy through the pipeline</p>
+  <p class="fig-sub">Correct answers on the 100-question held-out test, after each step</p>
+  <div class="plot" id="chart-journey"></div>
+  <details class="chart-table">
+    <summary>View as table — with each number's provenance</summary>
+    <table class="data">
+      <tr><th>Checkpoint</th><th>Eval precision</th><th>Correct / 100</th><th style="text-align:left">Source report</th></tr>
+      <tr><td>SFT baseline</td><td>bf16</td><td>74</td><td style="text-align:left">iterative_pruning_metrics</td></tr>
+      <tr><td>Pruning stage 1 · up_proj</td><td>bf16</td><td>77</td><td style="text-align:left">iterative_pruning_metrics</td></tr>
+      <tr><td>Pruning stage 2 · +gate_proj</td><td>bf16</td><td>68</td><td style="text-align:left">iterative_pruning_metrics</td></tr>
+      <tr><td>Pruning stage 3 · +down_proj</td><td>bf16</td><td>61</td><td style="text-align:left">iterative_pruning_metrics</td></tr>
+      <tr><td>Stage 3 reloaded for distillation</td><td>NF4</td><td>62</td><td style="text-align:left">iterative_distillation_metrics</td></tr>
+      <tr><td>Stage 3 distilled</td><td>NF4</td><td>80</td><td style="text-align:left">iterative_distillation_metrics</td></tr>
+      <tr><td>Distilled, benchmarked at fp16</td><td>fp16</td><td>79</td><td style="text-align:left">quantization_step_metrics</td></tr>
+      <tr><td>Distilled, benchmarked at INT8</td><td>INT8</td><td>81</td><td style="text-align:left">quantization_step_metrics</td></tr>
+      <tr><td>Distilled, NF4 — <strong>deployed</strong></td><td>NF4</td><td>81</td><td style="text-align:left">quantization_step_metrics</td></tr>
+      <tr><td>Distilled + merged, AWQ W4A16</td><td>W4A16</td><td>80</td><td style="text-align:left">awq_quantization_metrics</td></tr>
+    </table>
+  </details>
+</div>
+
+<h2>And the memory, told straight</h2>
+<p>These three bars come from two different kinds of measurement, so read the labels: the
+pruning "savings" of Chapter 2 is a theoretical number until sparse storage exists, while the
+quantization savings is measured fact.</p>
+
+<div class="fig">
+  <p class="fig-title">Weight memory: measured vs. theoretical</p>
+  <p class="fig-sub">The deployed artifact is the bottom bar</p>
+  <div class="legend">
+    <span class="key"><i class="swatch" style="background:var(--series-1)"></i> Measured footprint</span>
+    <span class="key"><i class="swatch" style="background:var(--de-emphasis)"></i> Theoretical (if zeros were free)</span>
+  </div>
+  <div class="plot" id="chart-mem"></div>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Accounting</th><th>GB</th><th style="text-align:left">Status</th></tr>
+      <tr><td>fp16, dense (zeros stored)</td><td>13.51</td><td style="text-align:left">measured</td></tr>
+      <tr><td>fp16 if 2:4 zeros were skipped</td><td>8.24</td><td style="text-align:left">theoretical — needs sparse storage/kernels</td></tr>
+      <tr><td>NF4 4-bit, dense</td><td>3.79</td><td style="text-align:left">measured — the deployed artifact</td></tr>
+    </table>
+  </details>
+</div>
+
+<h2>Grading against the success criteria</h2>
+<p>Chapter 1 listed the gates that were set before the experiments. The tally:</p>
+<ul>
+  <li><strong>Accuracy within 1–2% of baseline</strong> (the plan's pre-registered wording, which on this 100-question exam means 1–2 points) — passed with room: 81 vs 74.
+  The defensible claim is "no measurable loss" (the +7 is within ±4-point exam noise plus the
+  extra training distillation adds).</li>
+  <li><strong>Memory target</strong> — passed: 3.79 GB fits every GPU tier from Chapter 1's
+  chart, with headroom for activations and KV cache.</li>
+  <li><strong>No new unsafe behavior</strong> — <em>not actually measured.</em> The exam checks
+  yes/no/maybe accuracy only; hallucination and safety evaluation never ran. An honest
+  scorecard says so.</li>
+</ul>
+
+<h2>What ships</h2>
+<p>The deployment recipe is the distilled stage-3 checkpoint loaded 4-bit — the exact
+configuration it was repaired and benchmarked in:</p>
+
+<pre><code><span class="c"># the recommended checkpoint, as benchmarked (81/100 · 3.79 GB)</span>
+model = AutoModelForCausalLM.from_pretrained(
+    <span class="k">"artifacts/iterative-wanda-2of4-distilled/stage3_add_down_proj"</span>,
+    quantization_config=BitsAndBytesConfig(
+        load_in_4bit=<span class="k">True</span>,
+        bnb_4bit_quant_type=<span class="k">"nf4"</span>,        <span class="c"># Chapter 4's winner</span>
+        bnb_4bit_use_double_quant=<span class="k">True</span>,
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    ),
+)</code></pre>
+
+<h2>Caveats that survive scrutiny</h2>
+<ul>
+  <li><strong>The exam is small.</strong> 100 questions puts one standard error at ±4 points.
+  Every conclusion here is directionally solid (the 13-point drop, the 18-point recovery) but
+  single-digit deltas — including the final "+7" — should not be quoted as improvements.</li>
+  <li><strong>Accuracy is the only measured axis.</strong> No latency or throughput numbers, no
+  hallucination rate, no safety red-teaming. For a medical model those aren't optional before
+  any real deployment — this artifact is educational.</li>
+  <li><strong>The sparsity is still an IOU.</strong> The 2:4 pattern makes hardware speedups
+  and sparse storage <em>possible</em>, but this pipeline never cashed that check; the realized
+  72% memory cut is all quantization.</li>
+  <li><strong>The alignment footnote.</strong> The lifecycle continued after SFT — DPO/GRPO in
+  the sibling <code>medical-llm-RL</code> project — but left held-out accuracy unchanged, so
+  these compression results carry over. If a future alignment run actually moves accuracy,
+  re-running this pipeline becomes a real experiment: does compression preserve the gain?</li>
+</ul>
+
+<h2>What to try next</h2>
+<p>The best exercises this repo supports, in order:</p>
+<ol>
+  <li><strong>Widen the exam.</strong> Score baseline and compressed models on the full labeled
+  PubMedQA set or another medical benchmark. Watching error bars shrink around these
+  conclusions (or break them) is the most instructive follow-up.</li>
+  <li><strong>Cash the sparsity IOU.</strong> Run the stage-3 model through 2:4 sparse kernels
+  and sparse storage, and measure wall-clock latency and real VRAM — turning Chapter 2's paper
+  8.24 GB into an observed number.</li>
+  <li><strong>Prune the attention.</strong> The original plan reserved attention projections as
+  a cautious follow-up. The iterative harness makes it a one-line stage addition — watch the
+  gates.</li>
+  <li><strong>Re-match AWQ on equal footing.</strong> Chapter 6 serves the AWQ build in vLLM and
+  measures it against fp16; the open piece is putting NF4 and AWQ W4A16 head-to-head <em>in the
+  same stack</em> so their memory and latency are finally comparable, not just accuracy.</li>
+  <li><strong>Swap the subject.</strong> Nothing in the pipeline is medical except the data
+  paths: point the scripts at any finetuned checkpoint with a test set, and the same
+  prune → distill → quantize story replays on your model.</li>
+</ol>
+
+<p class="foot">⚠️ The compressed model inherits every limitation of the original — and the
+whole point of this chapter is that compression was verified on one narrow axis only. It
+answers medical questions in a convincing register; never use it for real medical decisions.
+That caveat compresses losslessly.</p>
+
+<div class="pager">
+  <a href="04-quantization.html"><span class="dir">← Previous</span> Chapter 4 · Quantization</a>
+  <a class="next" href="06-deployment.html"><span class="dir">Next →</span> Chapter 6 · Serving</a>
+</div>
+
+<script src="assets/charts.js"></script>
+<script>
+var STEPS = ["SFT", "prune 1", "prune 2", "prune 3", "distill", "NF4"];
+var STEPS_LONG = ["SFT checkpoint (baseline)", "Pruning stage 1 · up_proj", "Pruning stage 2 · +gate_proj",
+                  "Pruning stage 3 · +down_proj", "After distillation (stage 3)", "Quantized NF4 (deployed)"];
+FT.lineChart(document.getElementById("chart-journey").closest(".fig"), {
+  height: 250,
+  ariaLabel: "Line chart: accuracy 74 at baseline, 77 then 68 then 61 across pruning stages, 80 after distillation, 81 deployed in NF4",
+  xDomain: [-0.25, 5.4], yDomain: [50, 90],
+  xTicks: [0, 1, 2, 3, 4, 5], yTicks: [50, 60, 70, 80, 90],
+  xFmt: function (v) { return STEPS[v]; },
+  xTooltip: function (x) { return STEPS_LONG[x]; },
+  yFmt: function (v) { return String(v); },
+  series: [
+    { name: "of 100", color: "var(--series-1)", markers: true,
+      points: [[0,74],[1,77],[2,68],[3,61],[4,80],[5,81]] }
+  ],
+  endLabels: true,
+  annotations: [
+    { x: 1.75, y: 57, text: "pruning digs a hole", anchor: "middle" },
+    { x: 3.9, y: 86.5, text: "distillation climbs out", anchor: "middle" }
+  ]
+});
+FT.barChart(document.getElementById("chart-mem").closest(".fig"), {
+  ariaLabel: "Bar chart: 13.51 gigabytes measured at fp16 dense, 8.24 gigabytes theoretical if zeros were skipped, 3.79 gigabytes measured in NF4 — the deployed artifact",
+  max: 14, labelWidth: 210,
+  bars: [
+    { name: "fp16 · dense (measured)", value: 13.51, label: "13.51 GB", color: "var(--series-1)", tip: "zeros stored like any weight" },
+    { name: "fp16 · zeros skipped (theory)", value: 8.24, label: "8.24 GB", color: "var(--de-emphasis)", tip: "needs sparse storage/kernels" },
+    { name: "NF4 · deployed (measured)", value: 3.79, label: "3.79 GB · −72%", color: "var(--series-1)", tip: "the shipping artifact" }
+  ]
+});
+</script>
+</div>
+</body>
+</html>

@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 6 · Serving — Compression, visualized</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="site-head">
+  <a class="brand" href="index.html">Compression, visualized <span>· medical 7B case study</span></a>
+  <nav class="site-nav">
+    <a href="index.html">Overview</a>
+    <a href="01-baseline.html">1 · Baseline</a>
+    <a href="02-pruning.html">2 · Pruning</a>
+    <a href="03-distillation.html">3 · Distillation</a>
+    <a href="04-quantization.html">4 · Quantization</a>
+    <a href="05-results.html">5 · Results</a>
+    <a href="06-deployment.html" aria-current="page">6 · Serving</a>
+    <button class="theme-toggle" type="button" aria-label="Switch to dark mode">Dark mode</button>
+  </nav>
+</header>
+
+<p class="kicker">Chapter 6</p>
+<h1>Serving: the compressed model behind a real API</h1>
+<p class="lede">Five chapters produced a 3.8 GB checkpoint that scores 80/100. This one puts it to
+work: loaded into <strong>vLLM</strong>, an inference server, on the same RTX 4090, answering
+over HTTP. The payoff shows up here in two measured numbers — the weights load in
+<strong>3.6 seconds</strong>, and because they take only 3.88 GiB, the rest of the card holds
+<strong>2.24× more conversation</strong> than the uncompressed model could. Compression didn't
+just make the model <em>fit</em>; it made it <em>serve</em>.</p>
+
+<div class="tiles">
+  <div class="tile">
+    <div class="label">Weight load time</div>
+    <div class="value">3.6<small> s</small></div>
+    <div class="sub">full server ready in ~25 s</div>
+  </div>
+  <div class="tile">
+    <div class="label">Exam through the API</div>
+    <div class="value">80<small>/100</small></div>
+    <div class="sub">matches the offline AWQ score exactly</div>
+  </div>
+  <div class="tile">
+    <div class="label">Peak decode</div>
+    <div class="value">2,100<small> tok/s</small></div>
+    <div class="sub">~14× one stream, at 48 concurrent</div>
+  </div>
+  <div class="tile">
+    <div class="label">KV-cache headroom</div>
+    <div class="value">17.4<small> GiB</small></div>
+    <div class="sub">room for ~34 concurrent 4k chats</div>
+  </div>
+</div>
+
+<h2>From checkpoint to endpoint</h2>
+<p>A checkpoint on disk isn't a service. Something has to hold the weights in GPU memory, accept
+requests, batch them, run the forward passes, and stream tokens back. That's an inference
+server; here it's <a href="https://docs.vllm.ai" target="_blank" rel="noopener">vLLM</a>, which
+speaks the OpenAI API so any client that talks to OpenAI talks to this model unchanged. The
+whole launch is one command:</p>
+
+<pre><code><span class="c"># serve_vllm.sh — the deployable artifact behind an HTTP endpoint</span>
+vllm serve artifacts/awq-w4a16-stage3 \
+    <span class="k">--served-model-name</span> medical-7b-compressed \
+    <span class="k">--port</span> 8801 <span class="k">--max-model-len</span> 4096</code></pre>
+
+<p>Note <em>which</em> artifact ships. Chapter 4 kept NF4 as the default for a single-process
+load, and reached for <strong>AWQ W4A16</strong> only "when a serving stack specifically
+requires that format." vLLM is exactly that stack — AWQ W4A16 is its native 4-bit path — so the
+server loads the AWQ export. It scores 80/100, statistically identical to NF4's 81 (Chapter 1's
+±4-point noise), and now it's in the format the serving engine wants.</p>
+
+<div class="card" style="overflow-x:auto; padding:16px 8px;">
+  <svg viewBox="0 0 720 150" width="720" height="150" role="img" style="min-width:600px; display:block; margin:0 auto;"
+       aria-label="Diagram: an HTTP client sends a request to the vLLM server, which holds the 3.88 GiB of AWQ weights plus a 17.36 GiB paged KV cache on the GPU, and streams tokens back">
+    <defs>
+      <marker id="arrS" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="var(--baseline)"/>
+      </marker>
+    </defs>
+    <g font-family="system-ui,sans-serif">
+      <rect x="8" y="50" width="150" height="50" rx="9" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="83" y="72" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--text-primary)">HTTP client</text>
+      <text x="83" y="90" text-anchor="middle" font-size="11" fill="var(--text-secondary)">OpenAI-format request</text>
+      <line x1="158" y1="75" x2="196" y2="75" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arrS)"/>
+      <!-- server box holding weights + kv cache -->
+      <rect x="198" y="14" width="324" height="122" rx="11" fill="none" stroke="var(--series-1)" stroke-width="1.3" stroke-dasharray="4 3"/>
+      <text x="360" y="32" text-anchor="middle" font-size="12" font-weight="650" fill="var(--series-1)">vLLM server · RTX 4090 (24 GiB)</text>
+      <rect x="214" y="44" width="140" height="76" rx="9" fill="var(--accent-wash)" stroke="var(--series-1)" stroke-width="1.1"/>
+      <text x="284" y="74" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--text-primary)">AWQ weights</text>
+      <text x="284" y="92" text-anchor="middle" font-size="11" fill="var(--text-secondary)">3.88 GiB · 4-bit</text>
+      <text x="284" y="108" text-anchor="middle" font-size="11" fill="var(--text-muted)">loads in 3.6 s</text>
+      <rect x="366" y="44" width="140" height="76" rx="9" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="436" y="74" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--text-primary)">Paged KV cache</text>
+      <text x="436" y="92" text-anchor="middle" font-size="11" fill="var(--text-secondary)">17.36 GiB</text>
+      <text x="436" y="108" text-anchor="middle" font-size="11" fill="var(--text-muted)">the conversations</text>
+      <line x1="522" y1="75" x2="560" y2="75" stroke="var(--baseline)" stroke-width="1.5" marker-end="url(#arrS)"/>
+      <rect x="562" y="50" width="150" height="50" rx="9" fill="var(--surface)" stroke="var(--border)"/>
+      <text x="637" y="72" text-anchor="middle" font-size="12.5" font-weight="650" fill="var(--text-primary)">Streamed tokens</text>
+      <text x="637" y="90" text-anchor="middle" font-size="11" fill="var(--text-secondary)">yes / no / maybe …</text>
+    </g>
+  </svg>
+</div>
+
+<h2>The exam still passes — over HTTP this time</h2>
+<p>Every previous chapter graded the model in-process. Here the same 100 held-out questions go
+out as API calls, greedy decoding (so the answer is deterministic), first word graded. The
+endpoint returns <strong>80/100</strong> — the identical score the AWQ export earned offline in
+Chapter 4. Same weights, same answers, now across a socket:</p>
+
+<pre><code><span class="c"># one real request/response from the running server</span>
+<span class="k">Instruction:</span> Does increasing blood pH stimulate protein synthesis in dialysis patients?
+<span class="k">Answer:</span> <span class="hl">no</span> The results of this study indicate that increasing blood pH does not
+     stimulate protein synthesis in patients on hemodialysis. […]
+<span class="c"># reference label: "no" ✓  — only the first word is graded</span></code></pre>
+
+<div class="callout">
+<strong>80 here, 81 in Chapter 4 — same model, not a regression.</strong> Chapter 4's 81 was the
+NF4 build; this is the AWQ build vLLM serves, which scored 80 both offline and over the API. One
+question out of a hundred is inside the exam's ±4-point noise. The point of re-running it through
+the server isn't a new number — it's proof the number <em>survives deployment</em>.</div>
+
+<h2>Memory at serve time: the weights are the small part</h2>
+<p>Chapter 1 warned that weights are "only part of the bill — activations and KV cache come on
+top." Serving is where that bill comes due. Every active conversation needs a slice of
+<strong>KV cache</strong> (the per-token attention state), and that cache shares the card with
+the weights. Shrinking the weights hands the freed space straight to the cache. Loaded side by
+side on the same 24 GiB card, same 4096-token context limit:</p>
+
+<div class="fig">
+  <p class="fig-title">KV-cache capacity after the weights are loaded</p>
+  <p class="fig-sub">How many tokens of live conversation the card can hold — measured by vLLM at startup</p>
+  <div class="legend">
+    <span class="key"><i class="swatch" style="background:var(--series-1)"></i> AWQ 4-bit (deployed)</span>
+    <span class="key"><i class="swatch" style="background:var(--de-emphasis)"></i> fp16 dense (uncompressed)</span>
+  </div>
+  <div class="plot" id="chart-kv"></div>
+  <p class="note">At 4,096 tokens per conversation that is roughly <strong>34</strong> concurrent
+  full-length chats for the compressed model versus <strong>15</strong> for the fp16 one — the
+  same 2.24× ratio, in human terms.</p>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Loaded as</th><th>Weights on GPU</th><th>KV-cache free</th><th>KV-cache capacity</th></tr>
+      <tr><td>AWQ W4A16 (deployed)</td><td>3.88 GiB</td><td>17.36 GiB</td><td>142,208 tokens</td></tr>
+      <tr><td>fp16 dense (distilled)</td><td>13.5 GiB</td><td>7.75 GiB</td><td>63,456 tokens</td></tr>
+    </table>
+  </details>
+</div>
+
+<div class="callout">
+<strong>This is the serving-time dividend of compression.</strong> Fitting a smaller model on a
+given GPU is the obvious win. The subtler, bigger one: the 9.6 GiB the AWQ weights <em>don't</em>
+occupy becomes KV cache, so the same card serves 2.24× the concurrent users — or one user with
+2.24× the context. Compression buys throughput and context length, not merely a checkbox that
+says "it fits."</div>
+
+<h2>Throughput: batching is the multiplier</h2>
+<p>A single request decodes at about <strong>150 tokens/second</strong>. That feels slow because
+generating one token reads the entire model from GPU memory to produce a single number — the GPU
+is starved for work, not compute. Serve many requests at once and they <em>share</em> each weight
+read (vLLM's continuous batching), so aggregate throughput climbs steeply while any one user
+still sees snappy replies:</p>
+
+<div class="fig">
+  <p class="fig-title">Aggregate decode throughput vs. concurrent requests</p>
+  <p class="fig-sub">Total tokens/second generated, 128 tokens per request, AWQ build</p>
+  <div class="plot" id="chart-tput"></div>
+  <p class="note">Fourteen requests' worth of work for the price of one weight read: 48 in
+  flight yields ~2,100 tok/s, about 14× the single-stream rate.</p>
+  <details class="chart-table">
+    <summary>View as table</summary>
+    <table class="data">
+      <tr><th>Concurrent requests</th><th>Aggregate tokens/s</th></tr>
+      <tr><td>1</td><td>151</td></tr>
+      <tr><td>4</td><td>543</td></tr>
+      <tr><td>16</td><td>1,240</td></tr>
+      <tr><td>32</td><td>1,773</td></tr>
+      <tr><td>48</td><td>2,114</td></tr>
+    </table>
+  </details>
+</div>
+
+<div class="callout warn">
+<strong>Where the curve stops: an honest note.</strong> Pushed to 64 simultaneous requests on
+this machine, throughput <em>collapsed</em> to ~380 tok/s and every request took ~21 s instead
+of under a second. It wasn't a full KV cache (usage stayed under 6%) or a request queue (none
+formed) — the server log shows 64 running, none waiting. The slowdown is specific to this WSL2
+box, where vLLM itself warns it runs with pinned memory disabled; a bare-metal Linux server would
+be expected to scale further. Treat this as an environment artifact, not a property of the model,
+so the chart stops at the last clean point (48). Reporting the cliff rather than hiding it is the
+same rule the whole series follows.</div>
+
+<h2>What ships, and the honest limits</h2>
+<p>Two supported ways to run the final model, matched to the job:</p>
+<ul>
+  <li><strong>Throughput server → AWQ W4A16 via vLLM</strong> (this chapter): one command,
+  OpenAI-compatible, continuous batching, 80/100. Use it to serve many users.</li>
+  <li><strong>Single-process app → NF4 via bitsandbytes</strong> (Chapter 5's snippet): a plain
+  <code>from_pretrained</code> load, 81/100, no server to run. Use it for a script, a notebook,
+  or one embedded worker.</li>
+</ul>
+<p>Both are the <em>same</em> distilled stage-3 checkpoint from Chapter 3, differing only in the
+4-bit format each stack prefers — and scoring within one point of each other.</p>
+
+<div class="callout">
+<strong>What this chapter did not prove.</strong> One GPU, one machine — no replication,
+autoscaling, or failover. The throughput numbers are from a WSL2 box and should be treated as a
+lower bound. And the exam still measures only yes/no/maybe accuracy: the safety and hallucination
+evaluation Chapter 5 flagged as missing is still missing, and it matters more, not less, once the
+model is reachable over a network. This is a working deployment, not a production-hardened one.</div>
+
+<p>The upstream half of this story — how the base model and its LoRA adapter snap together at
+load time — lives in the sibling walkthrough's finale,
+<a href="../../medical-llm/docs/05-inference.html">Using the result</a> (link works when the two
+repos sit side by side). Between the two, you can follow one model from raw finetuning data all
+the way to a compressed HTTP endpoint.</p>
+
+<h2>Where these numbers come from</h2>
+<p>Every figure on this page was produced by, and can be reproduced with, two files added to the
+repo for this chapter:</p>
+<ul>
+  <li><code>serve_vllm.sh</code> — the one-line launcher shown above</li>
+  <li><code>run_vllm_serving_benchmark.py</code> — drives the endpoint: the 100-question exam,
+  the concurrency sweep, and the memory readout</li>
+  <li><code>reports/vllm_serving_metrics.json</code> / <code>.md</code> — the machine-readable
+  results, including the fp16-vs-AWQ footprint table</li>
+</ul>
+<p>Load-time facts (3.88 GiB / 3.6 s, 17.36 GiB and 142,208-token KV cache; 13.5 GiB / 7.75 GiB
+/ 63,456 tokens for the fp16 comparison) are read directly from vLLM's own startup log on the
+RTX 4090.</p>
+
+<div class="pager">
+  <a href="05-results.html"><span class="dir">← Previous</span> Chapter 5 · The scorecard</a>
+  <a class="next" href="index.html"><span class="dir">Back to</span> Overview</a>
+</div>
+
+<script src="assets/charts.js"></script>
+<script>
+FT.barChart(document.getElementById("chart-kv").closest(".fig"), {
+  ariaLabel: "Bar chart: after loading weights, the AWQ 4-bit build leaves room for 142,208 tokens of KV cache; the fp16 dense build leaves room for 63,456 — 2.24 times less",
+  max: 178000, labelWidth: 150,
+  bars: [
+    { name: "AWQ 4-bit (deployed)", value: 142208, label: "142,208 tokens", color: "var(--series-1)", tip: "17.36 GiB free for KV cache · ~34 concurrent 4k chats" },
+    { name: "fp16 dense", value: 63456, label: "63,456 tokens", color: "var(--de-emphasis)", tip: "7.75 GiB free for KV cache · ~15 concurrent 4k chats" }
+  ]
+});
+var TPUT_X = ["1", "4", "16", "32", "48"];
+FT.lineChart(document.getElementById("chart-tput").closest(".fig"), {
+  height: 250,
+  ariaLabel: "Line chart: aggregate decode throughput rises from 151 tokens per second at one concurrent request to 2,114 at 48 concurrent requests",
+  xDomain: [-0.25, 4.4], yDomain: [0, 2400],
+  xTicks: [0, 1, 2, 3, 4], yTicks: [0, 600, 1200, 1800, 2400],
+  xFmt: function (v) { return TPUT_X[v]; },
+  xTooltip: function (x) { return TPUT_X[x] + " concurrent"; },
+  yFmt: function (v) { return String(v); },
+  xLabel: "concurrent requests",
+  series: [
+    { name: "tok/s", color: "var(--series-1)", markers: true,
+      points: [[0,151],[1,543],[2,1240],[3,1773],[4,2114]] }
+  ],
+  endLabels: true,
+  annotations: [
+    { x: 2.1, y: 1520, text: "batching shares each weight read", anchor: "middle" }
+  ]
+});
+</script>
+</div>
+</body>
+</html>
