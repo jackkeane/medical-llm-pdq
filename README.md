@@ -15,6 +15,18 @@ It consumes artifacts produced in `medical-llm`:
 
 If those paths are missing, regenerate them in the `medical-llm` project first.
 
+## Relationship to the alignment stage (medical-llm-RL)
+
+The lifecycle order in this series is **SFT → align → compress**, and the sibling
+[medical-llm-RL](https://github.com/jackkeane/medical-llm-RL) project later aligned the SFT
+checkpoint with DPO and GRPO. These compression results nevertheless remain current, because that
+alignment left the model effectively unchanged on the held-out test set (75% verdict accuracy for
+SFT, DPO, and GRPO alike; GRPO's correct-answer set is identical to SFT's). Compression preserves
+what its input model does — so re-running prune/distill/quantize on the aligned checkpoints would
+reproduce these numbers within noise, and we deliberately did not. If a future alignment run
+actually improves accuracy, re-running this pipeline becomes a real experiment: does compression
+preserve the alignment gain?
+
 ## Environment
 
 Recommended environment:
